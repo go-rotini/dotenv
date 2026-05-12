@@ -15,8 +15,9 @@
 //   - [Lint]                          — flag non-portable constructs.
 //   - [File].Get/Set/Delete/Keys/ToMap — AST navigation and mutation.
 //   - [File].Source                   — snapshot the AST's effective map as a [*Source].
-//   - [File].Marshal                  — byte-exact round-trip emission.
-//   - [IsValidKey]                    — predicate for keys [File.Set] accepts.
+//   - [File].Marshal                  — byte-exact round-trip emission of an AST.
+//   - [Marshal] / [Write]             — map → `.env` bytes / file.
+//   - [IsValidKey]                    — predicate for keys [File.Set] / [Marshal] accept.
 //
 // # Dependencies
 //

@@ -2,6 +2,9 @@ package dotenv
 
 import (
 	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -183,8 +186,13 @@ func TestSet_PanicsOnInvalidKey(t *testing.T) {
 	for _, bad := range []string{"", "1FOO", "HAS SPACE", "A=B", "A#B", "-LEAD", `A"B`, "A\nB"} {
 		func() {
 			defer func() {
-				if recover() == nil {
+				r := recover()
+				if r == nil {
 					t.Errorf("Set(%q, ...) did not panic", bad)
+					return
+				}
+				if err, ok := r.(error); !ok || !errors.Is(err, ErrInvalidKey) {
+					t.Errorf("Set(%q, ...) panicked with %v (%T), want an error wrapping ErrInvalidKey", bad, r, r)
 				}
 			}()
 			f.Set(bad, "x")
@@ -241,6 +249,69 @@ func TestMarshal_NilFile(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("got %v, want nil", got)
+	}
+}
+
+// --- package-level Marshal(map) / Write ---
+
+func TestMarshalMap(t *testing.T) {
+	out, err := Marshal(map[string]string{"B": "2", "A": "1", "C": "needs quotes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "A=1\nB=2\nC=\"needs quotes\"\n" {
+		t.Errorf("Marshal = %q", out)
+	}
+	// Output re-parses to an equivalent map.
+	f, err := Parse(out)
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	for k, want := range map[string]string{"A": "1", "B": "2", "C": "needs quotes"} {
+		if v, ok := f.Get(k); !ok || v != want {
+			t.Errorf("re-parsed %s = (%q, %v), want %q", k, v, ok, want)
+		}
+	}
+	// Empty / nil map → empty output, no error.
+	if out, err := Marshal(nil); err != nil || len(out) != 0 {
+		t.Errorf("Marshal(nil) = (%q, %v)", out, err)
+	}
+	// Invalid key → error wrapping ErrInvalidKey.
+	if _, err := Marshal(map[string]string{"BAD KEY": "x"}); !errors.Is(err, ErrInvalidKey) {
+		t.Errorf("Marshal with an invalid key: err = %v, want wrapping ErrInvalidKey", err)
+	}
+}
+
+func TestWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.env")
+	if err := Write(path, map[string]string{"FOO": "bar", "BAZ": "qux"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "BAZ=qux\nFOO=bar\n" {
+		t.Errorf("written = %q", data)
+	}
+	// A newly-created `.env` must not be group/other-accessible.
+	if fi, err := os.Stat(path); err == nil {
+		if perm := fi.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("perm %o exposes group/other access", perm)
+		}
+	}
+	// Invalid key → error wrapping ErrInvalidKey, and the file is not created.
+	bad := filepath.Join(dir, "bad.env")
+	if err := Write(bad, map[string]string{"BAD KEY": "x"}); !errors.Is(err, ErrInvalidKey) {
+		t.Errorf("Write with an invalid key: err = %v, want wrapping ErrInvalidKey", err)
+	}
+	if _, err := os.Stat(bad); !os.IsNotExist(err) {
+		t.Error("Write should not create the file when Marshal fails")
+	}
+	// Write error (target path is a directory).
+	if err := Write(dir, map[string]string{"FOO": "bar"}); err == nil {
+		t.Error("Write to a directory path should error")
 	}
 }
 

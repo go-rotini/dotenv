@@ -97,4 +97,9 @@ var (
 	// ErrMaxExpansionDepth is the [ExpansionError.Cause] when expansion
 	// recursion exceeds the [WithMaxExpansionDepth] bound.
 	ErrMaxExpansionDepth = errors.New("dotenv: variable-expansion depth limit exceeded")
+
+	// ErrInvalidKey reports a key that is not a valid `.env` identifier (see
+	// [IsValidKey]). [Marshal] / [Write] return an error wrapping it; [File.Set]
+	// panics with an error wrapping it.
+	ErrInvalidKey = errors.New("dotenv: invalid key")
 )

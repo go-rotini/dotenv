@@ -33,10 +33,12 @@ likewise `WithExpansionParent` takes a one-method `VarLookup` interface that any
   `(*File).Marshal` is byte-exact on unmutated input; `Set`/`Delete` re-render only
   the affected line. (`Set` panics on a syntactically invalid key — see `IsValidKey`.
   Variable expansion done at parse time is not reflected by `Marshal`; use `ToMap`.)
+- Write back out: `Marshal(map[string]string) ([]byte, error)` renders a map as `.env`
+  bytes (sorted keys, minimal quoting); `Write(path, map)` does that plus a `0o600` write.
 - `Lint` reports deviations from the portable subset (`export ` prefix, `KEY: value`,
   non-POSIX identifiers, backtick values) as warnings, and parse failures as errors.
-- `Source` adapters: `NewSource` (from a path) and `NewReaderSource` (from an
-  `io.Reader`) return a `*Source` that any env loader accepts as a `Source`.
+- `Source` adapters: `NewSource` (path), `NewReaderSource` (`io.Reader`), `MapSource` (map),
+  and `(*File).Source` — all return a `*Source` that any env loader accepts as a `Source`.
 - DoS guards: max file size (default 10 MiB), max line length (default 1 MiB), and a
   bounded expansion-recursion depth (default 16) that catches deeply nested /
   self-referential `${VAR:-default}` chains.
@@ -109,13 +111,28 @@ out, _ := f.Marshal() // byte-exact for every untouched line
 os.WriteFile(".env", out, 0o600)
 ```
 
-`Set` panics if the key isn't a valid `.env` key (`dotenv.IsValidKey` is the predicate).
-It updates the **first** assignment of the key in place — preserving that line's original
-line ending — and removes any later assignments of the same key, so `Get`/`ToMap` agree
-with the value just set; if the key is absent it appends a new line (matching the source's
-line ending, and terminating the previous last line first if the source lacked a trailing
-newline). `Marshal` reflects `Set`/`Delete` mutations, not variable expansion performed at
-parse time (use `ToMap`/`Get` for expanded values).
+`Set` panics if the key isn't a valid `.env` key (`dotenv.IsValidKey` is the predicate;
+the panic value wraps `dotenv.ErrInvalidKey`). It updates the **first** assignment of the
+key in place — preserving that line's original line ending — and removes any later
+assignments of the same key, so `Get`/`ToMap` agree with the value just set; if the key is
+absent it appends a new line (matching the source's line ending, and terminating the
+previous last line first if the source lacked a trailing newline). `(*File).Marshal`
+reflects `Set`/`Delete` mutations, not variable expansion performed at parse time (use
+`ToMap`/`Get` for expanded values).
+
+### Write a `.env` file from a map
+
+```go
+m := map[string]string{"PORT": "8080", "GREETING": "hello world"}
+
+b, err := dotenv.Marshal(m)            // []byte: sorted keys, LF endings, minimal quoting
+if err != nil { log.Fatal(err) }       // err (wrapping ErrInvalidKey) if a key is invalid
+_ = b
+
+if err := dotenv.Write(".env", m); err != nil { // Marshal + write with 0o600 (not atomic)
+	log.Fatal(err)
+}
+```
 
 ### Lint
 
@@ -152,6 +169,8 @@ for _, iss := range issues {
   `dotenv.ErrAssertionFailed` for a failed `${VAR:?msg}` assertion, or
   `dotenv.ErrMaxExpansionDepth` when the `WithMaxExpansionDepth` bound was exceeded.
 - `dotenv.ErrFileTooLarge`, `dotenv.ErrLineTooLong` — resource-limit violations.
+- `dotenv.ErrInvalidKey` — wrapped by the error `Marshal`/`Write` return (and by the value
+  `(*File).Set` panics with) when a key isn't a valid `.env` identifier.
 
 ## Documentation
 

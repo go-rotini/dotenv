@@ -103,13 +103,14 @@ func (f *File) Get(key string) (value string, ok bool) {
 // source's last line uses. Surrounding entries keep their original bytes, so
 // round-trip is byte-exact except for the mutated/added line.
 //
-// Set panics if key is not a valid `.env` key (see [IsValidKey]).
+// Set panics (with an error wrapping [ErrInvalidKey]) if key is not a valid
+// `.env` key — see [IsValidKey].
 func (f *File) Set(key, value string) {
 	if f == nil {
 		return
 	}
 	if !IsValidKey(key) {
-		panic(fmt.Sprintf("dotenv: Set: invalid key %q", key))
+		panic(fmt.Errorf("dotenv: Set: key %q: %w", key, ErrInvalidKey))
 	}
 
 	first := -1
@@ -160,9 +161,11 @@ func (f *File) Set(key, value string) {
 // valid key is non-empty, does not begin with a digit, and otherwise
 // contains only identifier bytes: ASCII letters, digits and '_', plus —
 // beyond the portable POSIX subset [A-Za-z_][A-Za-z0-9_]* — '-', '.', and
-// non-ASCII bytes. [(*File).Set] panics on an invalid key. (Keys outside the
-// POSIX subset only re-parse under [WithRelaxedNames]; the POSIX subset is
-// always safe.)
+// non-ASCII bytes. (Keys outside the POSIX subset only re-parse under
+// [WithRelaxedNames]; the POSIX subset is always safe.)
+//
+// [Marshal] / [Write] reject an invalid key with an error wrapping
+// [ErrInvalidKey]; [File.Set] panics with one.
 func IsValidKey(key string) bool {
 	if key == "" || !isIdentifierStart(key[0], true) {
 		return false

@@ -2,6 +2,9 @@ package dotenv
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"slices"
 	"strings"
 )
 
@@ -23,6 +26,48 @@ func (f *File) Marshal() ([]byte, error) {
 		buf.Write(e.raw)
 	}
 	return buf.Bytes(), nil
+}
+
+// Marshal renders m as a `.env`-format byte stream: one `KEY=VALUE` line per
+// entry, keys in sorted (deterministic) order, LF line endings, values
+// double-quoted only when a bare value would not round-trip. The output
+// re-parses to an equivalent map via [Parse] / [Load].
+//
+// Marshal returns an error wrapping [ErrInvalidKey] if any key is not a valid
+// `.env` key (see [IsValidKey]) — emitting such a key would produce output
+// that fails to re-parse. To turn a parsed [*File] back into bytes (preserving
+// comments and formatting), use [(*File).Marshal] instead.
+func Marshal(m map[string]string) ([]byte, error) {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	var buf bytes.Buffer
+	for _, k := range keys {
+		if !IsValidKey(k) {
+			return nil, fmt.Errorf("dotenv: marshal: key %q: %w", k, ErrInvalidKey)
+		}
+		buf.Write(renderAssignmentLine(k, m[k], "\n"))
+	}
+	return buf.Bytes(), nil
+}
+
+// Write renders m with [Marshal] and writes it to path with 0o600
+// permissions (creating the file, or truncating an existing one without
+// changing its mode). Write is not atomic; for crash-safe replacement, use
+// [Marshal] and write the bytes through your preferred mechanism (for
+// example, github.com/go-rotini/fs's atomic WriteFile).
+func Write(path string, m map[string]string) error {
+	data, err := Marshal(m)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("dotenv: write %s: %w", path, err)
+	}
+	return nil
 }
 
 // renderAssignmentLine produces source bytes for a fresh assignment:
