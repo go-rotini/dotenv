@@ -11,8 +11,6 @@ tool (
 	golang.org/x/vuln/cmd/govulncheck
 )
 
-require github.com/go-rotini/env v0.0.0
-
 require (
 	4d63.com/gocheckcompilerdirectives v1.3.0 // indirect
 	4d63.com/gochecknoglobals v0.2.2 // indirect
@@ -236,8 +234,3 @@ require (
 	mvdan.cc/gofumpt v0.9.2 // indirect
 	mvdan.cc/unparam v0.0.0-20251027182757-5beb8c8f8f15 // indirect
 )
-
-// TODO(extract-dotenv): replace with a published version of go-rotini/env
-// once it is tagged, then remove this replace directive. dotenv must not
-// ship with a replace.
-replace github.com/go-rotini/env => ../env

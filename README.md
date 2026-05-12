@@ -2,20 +2,23 @@
 
 A Go `.env` file parser: a conservative, portable subset of the `.env` dialects in
 the wild, with opt-in extensions, a lossless AST for round-trip editing, a linter
-that flags non-portable constructs, and adapters that surface a parsed file as a
-[`env.Source`](https://pkg.go.dev/github.com/go-rotini/env#Source).
+that flags non-portable constructs, and a `Source` that drops straight into an
+environment-variable loader.
 
 This package is the `.env` parsing layer for [go-rotini/env](https://github.com/go-rotini/env)
-and the [rotini](https://github.com/go-rotini/rotini) CLI framework. It imports
-`go-rotini/env` for the `Source` and `Position` types; the reverse import would be a
-cycle and is not permitted, which keeps `go-rotini/env` free of `.env`-parsing code.
+and the [rotini](https://github.com/go-rotini/rotini) CLI framework — but it has
+**no dependencies**: nothing outside the standard library, and no other go-rotini
+module either. `dotenv.Source` is a small struct whose `Lookup` method is
+structurally compatible with `go-rotini/env`'s `Source` interface, so a parsed
+`.env` file plugs into an env loader's source chain without dotenv importing env;
+likewise `WithExpansionParent` takes a one-method `VarLookup` interface that any
+`env.Source` (e.g. `env.OSEnv()`) satisfies.
 
 > **Watching / live reload is not in this package.** Re-reading a `.env` file when it
 > changes on disk is handled one layer up, by a package that composes
-> [`go-rotini/fs`](https://github.com/go-rotini/fs)'s file watcher with `dotenv.Parse`
-> and `env.Source` — the same mechanism used for yaml/toml/jsonc/jsonschema config
-> files. `dotenv` itself reads the file once at construction; subsequent on-disk
-> changes do not propagate. This keeps `dotenv` a zero-third-party-dependency parser.
+> [`go-rotini/fs`](https://github.com/go-rotini/fs)'s file watcher with `dotenv.Parse` —
+> the same mechanism used for yaml/toml/jsonc/jsonschema config files. `dotenv` itself
+> reads the file once at construction; subsequent on-disk changes do not propagate.
 
 ## Features
 
@@ -23,18 +26,19 @@ cycle and is not permitted, which keeps `go-rotini/env` free of `.env`-parsing c
   (`export ` prefix, YAML-style `KEY: value`, backtick quoting, variable expansion,
   multi-line double-quoted strings, relaxed identifiers) is opt-in via `ParseOption`s.
 - Bash-style variable expansion (opt-in): `$VAR`, `${VAR}`, `${VAR:-default}`,
-  `${VAR-default}`, `${VAR:?error}`, `\$` to suppress; an optional parent `env.Source`
-  (e.g. `env.OSEnv()`) for references not defined in the file.
+  `${VAR-default}`, `${VAR:?error}`, `\$` to suppress; resolve references not defined
+  in the file from the process environment with `WithExpandFromOSEnv()`, or from any
+  `VarLookup` (e.g. `env.OSEnv()`, `env.Map(...)`) via `WithExpansionParent`.
 - Lossless `File` AST: entry order and per-entry source bytes are preserved, so
   `(*File).Marshal` is byte-exact on unmutated input; `Set` re-renders only the
   mutated line.
 - `Lint` reports deviations from the portable subset (`export ` prefix, `KEY: value`,
   non-POSIX identifiers, backtick values) as warnings, and parse failures as errors.
-- `env.Source` adapters: `NewSource` (from a path) and `NewReaderSource` (from an
-  `io.Reader`), so a `.env` file drops straight into an `env` loader's source chain.
+- `Source` adapters: `NewSource` (from a path) and `NewReaderSource` (from an
+  `io.Reader`) return a `*Source` that any env loader accepts as a `Source`.
 - DoS guards: max file size (default 10 MiB), max line length (default 1 MiB),
-  expansion depth (default 16), and expansion-cycle detection (`ErrExpansion`).
-- Zero third-party dependencies (the only module dependency is `go-rotini/env`).
+  expansion depth (default 16), expansion-cycle detection.
+- Zero dependencies — `go.mod` has no `require` line at all (only the dev `tool` block).
 
 ## Installation
 
@@ -59,7 +63,10 @@ fmt.Println(m["DATABASE_URL"])
 `dotenv.Parse([]byte, ...ParseOption)` does the same from a byte slice and returns the
 `*File` AST.
 
-### Use as an `env.Source`
+### Use as a loader source
+
+`dotenv.NewSource` returns a `*dotenv.Source`, which satisfies `go-rotini/env`'s
+`Source` interface structurally (no import edge needed):
 
 ```go
 import (
@@ -67,7 +74,7 @@ import (
 	"github.com/go-rotini/dotenv"
 )
 
-src, err := dotenv.NewSource(".env", dotenv.WithExpand())
+src, err := dotenv.NewSource(".env", dotenv.WithExpandFromOSEnv())
 if err != nil { log.Fatal(err) }
 
 // OSEnv() listed first wins over the .env file (the standard Compose / Heroku
@@ -80,8 +87,9 @@ if err := loader.Load(&cfg); err != nil {
 }
 ```
 
-`dotenv.NewReaderSource(io.Reader, ...ParseOption)` builds a `Source` from an already-open
-stream. Both adapters take a snapshot at construction.
+`dotenv.NewReaderSource(io.Reader, ...ParseOption)` builds a `*Source` from an already-open
+stream. Both take a snapshot at construction. `(*Source).Lookup` and `(*Source).ToMap`
+are the only methods.
 
 ### Lossless editing
 
@@ -102,7 +110,7 @@ os.WriteFile(".env", out, 0o600)
 ```go
 issues, err := dotenv.Lint(data)
 for _, iss := range issues {
-	fmt.Printf("%s:%d: [%s] %s: %s\n", iss.Pos.File, iss.Pos.Line, iss.Severity, iss.Rule, iss.Message)
+	fmt.Printf("%s: [%s] %s: %s\n", iss.Pos, iss.Severity, iss.Rule, iss.Message)
 }
 // err != nil when the input failed to parse; warnings collected before the
 // failure are still returned.
@@ -113,8 +121,9 @@ for _, iss := range issues {
 | Option | Effect |
 | --- | --- |
 | `WithExpand()` | Enable `$VAR` / `${VAR...}` expansion in unquoted and double-quoted values. |
-| `WithStrictExpansion()` | Unset variable references raise `*ExpansionError` instead of expanding to empty. |
-| `WithExpansionParent(env.Source)` | Source consulted for references not defined in the file (e.g. `env.OSEnv()`). |
+| `WithExpandFromOSEnv()` | Like `WithExpand()`, and resolve references not defined in the file from the process environment (`os.LookupEnv`). |
+| `WithExpansionParent(VarLookup)` | Resolve references not defined in the file from a `VarLookup` (e.g. `env.OSEnv()`, `env.Map(...)`). Requires `WithExpand()` or `WithExpandFromOSEnv()`. |
+| `WithStrictExpansion()` | Unset variable references raise `*ExpansionError` (cause `ErrUnsetVariable`) instead of expanding to empty. |
 | `WithMaxExpansionDepth(int)` | Bound expansion recursion (default 16). |
 | `WithBackticks()` | Accept backtick-quoted values (motdotla/dotenv dialect); treated like single quotes. |
 | `WithStrictDotenv()` | Reject non-portable constructs (`KEY: value`, `export ` prefix, non-POSIX identifiers). |
@@ -125,9 +134,10 @@ for _, iss := range issues {
 ## Errors
 
 - `*ParseError` (`errors.Is(err, dotenv.ErrParse)`) — malformed `.env` source; carries
-  file path and line/column.
-- `*ExpansionError` (`errors.Is(err, dotenv.ErrExpansion)`) — unset variable under
-  strict expansion, a `${VAR:?msg}` assertion failure, depth-bound exceeded, or a cycle.
+  file path and line/column (`ParseError.Pos`, a `dotenv.Position`).
+- `*ExpansionError` (`errors.Is(err, dotenv.ErrExpansion)`) — variable-expansion failure.
+  Its `Cause` is `dotenv.ErrUnsetVariable` for an unset reference under strict expansion,
+  or `dotenv.ErrAssertionFailed` for a failed `${VAR:?msg}` assertion.
 - `dotenv.ErrFileTooLarge`, `dotenv.ErrLineTooLong` — resource-limit violations.
 
 ## Documentation

@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-
-	"github.com/go-rotini/env"
 )
 
 // Parse parses data as a `.env` byte stream and returns the resulting
@@ -39,12 +37,14 @@ func Load(path string, opts ...ParseOption) (map[string]string, error) {
 	return f.ToMap(), nil
 }
 
-// NewSource reads a `.env` file from path and returns an [env.Source]
-// over its parsed map. The source is a snapshot taken at construction;
-// subsequent file changes do not propagate. For live reload, layer a
-// file watcher (e.g. from github.com/go-rotini/fs) over [Parse] and
-// re-derive the source on change.
-func NewSource(path string, opts ...ParseOption) (env.Source, error) {
+// NewSource reads a `.env` file from path and returns a [*Source] over its
+// parsed map. The source is a snapshot taken at construction; subsequent file
+// changes do not propagate (for live reload, layer a file watcher — e.g. from
+// github.com/go-rotini/fs — over [Parse] and re-derive the source on change).
+//
+// (*Source).Lookup makes the result usable wherever a github.com/go-rotini/env
+// Source is expected, without dotenv importing env.
+func NewSource(path string, opts ...ParseOption) (*Source, error) {
 	o := defaultParseOptions()
 	for _, opt := range opts {
 		opt(&o)
@@ -59,12 +59,12 @@ func NewSource(path string, opts ...ParseOption) (env.Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &fileSource{m: f.ToMap()}, nil
+	return &Source{m: f.ToMap()}, nil
 }
 
-// NewReaderSource reads a `.env` byte stream from r and returns an
-// [env.Source] over its parsed map.
-func NewReaderSource(r io.Reader, opts ...ParseOption) (env.Source, error) {
+// NewReaderSource reads a `.env` byte stream from r and returns a [*Source]
+// over its parsed map.
+func NewReaderSource(r io.Reader, opts ...ParseOption) (*Source, error) {
 	o := defaultParseOptions()
 	for _, opt := range opts {
 		opt(&o)
@@ -77,16 +77,5 @@ func NewReaderSource(r io.Reader, opts ...ParseOption) (env.Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &fileSource{m: f.ToMap()}, nil
+	return &Source{m: f.ToMap()}, nil
 }
-
-type fileSource struct {
-	m map[string]string
-}
-
-func (s *fileSource) Lookup(key string) (string, bool) {
-	v, ok := s.m[key]
-	return v, ok
-}
-
-var _ env.Source = (*fileSource)(nil)

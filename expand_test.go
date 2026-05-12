@@ -3,9 +3,16 @@ package dotenv
 import (
 	"errors"
 	"testing"
-
-	"github.com/go-rotini/env"
 )
+
+// kvLookup is a tiny in-memory [VarLookup] for exercising
+// [WithExpansionParent] without depending on github.com/go-rotini/env.
+type kvLookup map[string]string
+
+func (k kvLookup) Lookup(key string) (string, bool) {
+	v, ok := k[key]
+	return v, ok
+}
 
 // --- $VAR / ${VAR} basic forms ---
 
@@ -113,8 +120,8 @@ func TestExpand_DefaultIsExpanded(t *testing.T) {
 func TestExpand_ColonQuestionUnsetErrors(t *testing.T) {
 	src := `FOO=${MISSING:?required for foo}` + "\n"
 	_, err := Parse([]byte(src), WithExpand())
-	if !errors.Is(err, env.ErrExpansionAssertion) {
-		t.Errorf("err = %v, want ErrExpansionAssertion", err)
+	if !errors.Is(err, ErrAssertionFailed) {
+		t.Errorf("err = %v, want ErrAssertionFailed", err)
 	}
 	if !errors.Is(err, ErrExpansion) {
 		t.Errorf("err is not ExpansionError")
@@ -134,8 +141,8 @@ func TestExpand_ColonQuestionSetSucceeds(t *testing.T) {
 func TestExpand_StrictExpansion(t *testing.T) {
 	src := `FOO=${MISSING}` + "\n"
 	_, err := Parse([]byte(src), WithExpand(), WithStrictExpansion())
-	if !errors.Is(err, env.ErrUnsetExpansion) {
-		t.Errorf("err = %v, want ErrUnsetExpansion", err)
+	if !errors.Is(err, ErrUnsetVariable) {
+		t.Errorf("err = %v, want ErrUnsetVariable", err)
 	}
 }
 
@@ -150,7 +157,7 @@ func TestExpand_LenientUnsetExpandsToEmpty(t *testing.T) {
 // --- WithExpansionParent ---
 
 func TestExpand_ExpansionParent(t *testing.T) {
-	parent := env.Map(map[string]string{"FROM_PARENT": "the-value"})
+	parent := kvLookup(map[string]string{"FROM_PARENT": "the-value"})
 	src := `FOO=${FROM_PARENT}` + "\n"
 	f := mustParse(t, src, WithExpand(), WithExpansionParent(parent))
 	if v, _ := f.Get("FOO"); v != "the-value" {
@@ -159,7 +166,7 @@ func TestExpand_ExpansionParent(t *testing.T) {
 }
 
 func TestExpand_FilePrecedesParent(t *testing.T) {
-	parent := env.Map(map[string]string{"X": "from-parent"})
+	parent := kvLookup(map[string]string{"X": "from-parent"})
 	src := "X=from-file\nFOO=${X}\n"
 	f := mustParse(t, src, WithExpand(), WithExpansionParent(parent))
 	if v, _ := f.Get("FOO"); v != "from-file" {

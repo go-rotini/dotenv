@@ -3,15 +3,13 @@ package dotenv
 import (
 	"errors"
 	"fmt"
-
-	"github.com/go-rotini/env"
 )
 
 // ParseError is returned by [Parse] / [Load] / [NewSource] when the
 // `.env` source is malformed. It carries the file path (when available)
 // and the line/column position of the failure.
 type ParseError struct {
-	Pos     env.Position
+	Pos     Position
 	Message string
 }
 
@@ -35,9 +33,11 @@ func (*ParseError) Is(target error) bool {
 
 // ExpansionError is returned when variable expansion fails: an unset
 // variable under [WithStrictExpansion], a `${VAR:?msg}` assertion
-// failure, a depth-bound exceeded, or a reference cycle.
+// failure, a depth-bound exceeded, or a reference cycle. For the first
+// two cases, [ExpansionError.Cause] (and hence [errors.Is]) is
+// [ErrUnsetVariable] or [ErrAssertionFailed] respectively.
 type ExpansionError struct {
-	Pos      env.Position
+	Pos      Position
 	Variable string
 	Reason   string
 	Cause    error
@@ -83,4 +83,12 @@ var (
 
 	// ErrLineTooLong is returned when a single line exceeds [WithMaxLineLength].
 	ErrLineTooLong = errors.New("dotenv: line length exceeds limit")
+
+	// ErrUnsetVariable is the [ExpansionError.Cause] when expansion under
+	// [WithStrictExpansion] references a variable that is not set.
+	ErrUnsetVariable = errors.New("dotenv: variable referenced in expansion is unset")
+
+	// ErrAssertionFailed is the [ExpansionError.Cause] when a `${VAR:?msg}`
+	// assertion fails during expansion.
+	ErrAssertionFailed = errors.New("dotenv: ${VAR:?...} assertion failed")
 )

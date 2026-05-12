@@ -145,14 +145,6 @@ linters:
       simple: true
       for-loops: true
 
-    gomoddirectives:
-      # TODO(extract-dotenv): drop these two settings together with the
-      # `replace github.com/go-rotini/env => ../env` directive in go.mod once
-      # go-rotini/env is tagged and dotenv requires a published version.
-      replace-local: true
-      replace-allow-list:
-        - github.com/go-rotini/env
-
   exclusions:
     presets:
       - comments

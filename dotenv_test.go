@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/go-rotini/env"
 )
 
 // --- Load (file → map) ---
@@ -59,12 +57,12 @@ func TestParse_HappyPath(t *testing.T) {
 	}
 }
 
-// --- NewSource (file → env.Source) ---
+// --- NewSource (file → *Source) ---
 
 func TestNewSource_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".env")
-	if err := os.WriteFile(path, []byte("FOO=from-file\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("FOO=from-file\nEMPTY=\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	src, err := NewSource(path)
@@ -74,12 +72,21 @@ func TestNewSource_HappyPath(t *testing.T) {
 	if v, ok := src.Lookup("FOO"); !ok || v != "from-file" {
 		t.Errorf("got (%q, %v)", v, ok)
 	}
+	if v, ok := src.Lookup("EMPTY"); !ok || v != "" {
+		t.Errorf("EMPTY = (%q, %v); want (\"\", true) — set-but-empty", v, ok)
+	}
 	if _, ok := src.Lookup("MISSING"); ok {
 		t.Error("missing key returned ok=true")
 	}
+	if got := src.ToMap()["FOO"]; got != "from-file" {
+		t.Errorf("ToMap()[FOO] = %q", got)
+	}
 }
 
-func TestNewSource_ImplementsEnvSource(t *testing.T) {
+// TestNewSource_LookupShape pins down that *Source's method set matches what
+// an env loader's Source interface expects, so a parsed `.env` file plugs in
+// with no adapter and no import edge to github.com/go-rotini/env.
+func TestNewSource_LookupShape(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".env")
 	if err := os.WriteFile(path, []byte("FOO=x\n"), 0o600); err != nil {
@@ -89,8 +96,11 @@ func TestNewSource_ImplementsEnvSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Compile-time assertion: the interface value satisfies env.Source.
-	var _ env.Source = src
+	// Structural assertion: the same shape env.Source requires.
+	var _ interface {
+		Lookup(key string) (value string, ok bool)
+	} = src
+	var _ VarLookup = src
 }
 
 func TestNewSource_FileNotFound(t *testing.T) {
@@ -109,6 +119,16 @@ func TestNewSource_ParseError(t *testing.T) {
 	_, err := NewSource(path)
 	if !errors.Is(err, ErrParse) {
 		t.Errorf("err = %v, want ErrParse", err)
+	}
+}
+
+func TestSource_NilSafety(t *testing.T) {
+	var s *Source
+	if _, ok := s.Lookup("FOO"); ok {
+		t.Error("nil *Source Lookup returned ok=true")
+	}
+	if s.ToMap() != nil {
+		t.Error("nil *Source ToMap returned non-nil")
 	}
 }
 
@@ -133,60 +153,7 @@ func TestNewReaderSource_ParseError(t *testing.T) {
 	}
 }
 
-// --- Loader integration ---
-
-func TestNewSource_IntegratesWithLoader(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".env")
-	if err := os.WriteFile(path, []byte("DATABASE_URL=postgres://from-file\nPORT=9000\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	src, err := NewSource(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	type cfg struct {
-		Port  int    `env:"PORT,default=8080"`
-		DBURL string `env:"DATABASE_URL,required"`
-	}
-	loader := env.New(env.WithSource(env.OSEnv(), src))
-	var c cfg
-	if err := loader.Load(&c); err != nil {
-		t.Fatal(err)
-	}
-	if c.Port != 9000 {
-		t.Errorf("Port = %d", c.Port)
-	}
-	if c.DBURL != "postgres://from-file" {
-		t.Errorf("DBURL = %q", c.DBURL)
-	}
-}
-
-func TestNewSource_OSEnvWinsOverDotenv(t *testing.T) {
-	const key = "ENVTEST_DOTENV_PRECEDENCE"
-	t.Setenv(key, "from-osenv")
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".env")
-	if err := os.WriteFile(path, []byte(key+"=from-file\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	src, err := NewSource(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	type cfg struct {
-		V string `env:"ENVTEST_DOTENV_PRECEDENCE"`
-	}
-	// OSEnv first; dotenv as fallback.
-	loader := env.New(env.WithSource(env.OSEnv(), src))
-	var c cfg
-	if err := loader.Load(&c); err != nil {
-		t.Fatal(err)
-	}
-	if c.V != "from-osenv" {
-		t.Errorf("V = %q (OSEnv should win)", c.V)
-	}
-}
+// Note: end-to-end "a dotenv source flows through a loader, OSEnv wins over
+// the file" coverage lives in github.com/go-rotini/env (and the higher-level
+// rotini CLI package), which can import this package; dotenv intentionally
+// does not depend on env.

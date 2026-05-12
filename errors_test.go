@@ -3,13 +3,11 @@ package dotenv
 import (
 	"errors"
 	"testing"
-
-	"github.com/go-rotini/env"
 )
 
 func TestParseError(t *testing.T) {
 	e := &ParseError{
-		Pos:     env.Position{File: "x.env", Line: 5, Column: 3},
+		Pos:     Position{File: "x.env", Line: 5, Column: 3},
 		Message: "bad token",
 	}
 	got := e.Error()
@@ -23,7 +21,7 @@ func TestParseError(t *testing.T) {
 	}
 
 	// Without file path.
-	e2 := &ParseError{Pos: env.Position{Line: 5, Column: 3}, Message: "x"}
+	e2 := &ParseError{Pos: Position{Line: 5, Column: 3}, Message: "x"}
 	if !contains(e2.Error(), "line 5") {
 		t.Errorf("got %q", e2.Error())
 	}
@@ -42,7 +40,7 @@ func TestParseError(t *testing.T) {
 
 func TestExpansionError(t *testing.T) {
 	e := &ExpansionError{
-		Pos:      env.Position{Line: 3},
+		Pos:      Position{Line: 3},
 		Variable: "MISSING",
 		Reason:   "unset",
 		Cause:    errors.New("inner"),

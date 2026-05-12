@@ -1,10 +1,6 @@
 package dotenv
 
-import (
-	"slices"
-
-	"github.com/go-rotini/env"
-)
+import "slices"
 
 // EntryKind classifies one logical line in a `.env` file.
 type EntryKind int
@@ -38,7 +34,7 @@ type Entry struct {
 	Value string
 
 	// Pos is the source position of the entry's first byte.
-	Pos env.Position
+	Pos Position
 
 	// quote is the value's source quoting form (0, '"', '\'', or '`')
 	// — internal to the parse → expand pipeline.

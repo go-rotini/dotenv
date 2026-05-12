@@ -3,8 +3,6 @@ package dotenv
 import (
 	"fmt"
 	"strings"
-
-	"github.com/go-rotini/env"
 )
 
 // dollarSuppressSentinel marks a literal `$` produced by a `\$`
@@ -40,11 +38,11 @@ func (f *File) expandAll(opts parseOptions) error {
 	return nil
 }
 
-func expand(s string, pos env.Position, opts parseOptions, resolved map[string]string) (string, error) {
+func expand(s string, pos Position, opts parseOptions, resolved map[string]string) (string, error) {
 	return expandWithDepth(s, pos, opts, resolved, 0)
 }
 
-func expandWithDepth(s string, pos env.Position, opts parseOptions, resolved map[string]string, depth int) (string, error) {
+func expandWithDepth(s string, pos Position, opts parseOptions, resolved map[string]string, depth int) (string, error) {
 	if depth > opts.maxExpansionDepth {
 		return "", &ExpansionError{
 			Pos:    pos,
@@ -102,7 +100,7 @@ func expandWithDepth(s string, pos env.Position, opts parseOptions, resolved map
 					Pos:      pos,
 					Variable: name,
 					Reason:   "unset variable referenced",
-					Cause:    env.ErrUnsetExpansion,
+					Cause:    ErrUnsetVariable,
 				}
 			case isSet && value == "" && hasDefault && defaultIfEmpty:
 				needsDefault = true
@@ -119,7 +117,7 @@ func expandWithDepth(s string, pos env.Position, opts parseOptions, resolved map
 					Pos:      pos,
 					Variable: name,
 					Reason:   assertExpanded,
-					Cause:    env.ErrExpansionAssertion,
+					Cause:    ErrAssertionFailed,
 				}
 			case needsDefault:
 				expandedDefault, err := expandWithDepth(defaultVal, pos, opts, resolved, depth+1)

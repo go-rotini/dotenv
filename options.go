@@ -1,7 +1,5 @@
 package dotenv
 
-import "github.com/go-rotini/env"
-
 // ParseOption configures [Parse], [Load], [NewSource],
 // [NewReaderSource], and [Lint].
 type ParseOption func(*parseOptions)
@@ -10,7 +8,7 @@ type parseOptions struct {
 	expand            bool
 	strictExpansion   bool
 	maxExpansionDepth int
-	expansionParent   env.Source
+	expansionParent   VarLookup
 	backticks         bool
 	strictDotenv      bool
 	maxFileSize       int64
@@ -54,12 +52,28 @@ func WithMaxExpansionDepth(n int) ParseOption {
 	}
 }
 
-// WithExpansionParent sets the parent [env.Source] consulted by variable
-// expansion when a referenced variable is not present in the file's own
-// entries. Typical use: [env.OSEnv] so the file can reference
-// process-env vars.
-func WithExpansionParent(parent env.Source) ParseOption {
+// WithExpansionParent sets the [VarLookup] consulted by variable expansion
+// when a referenced variable is not present in the file's own entries. It
+// has no effect unless [WithExpand] (or [WithExpandFromOSEnv]) is also set.
+//
+// Any github.com/go-rotini/env Source satisfies [VarLookup], so passing
+// env.OSEnv() or env.Map(...) works directly. For the common
+// "fall back to the process environment" case, [WithExpandFromOSEnv] is
+// shorter and pulls in no dependency.
+func WithExpansionParent(parent VarLookup) ParseOption {
 	return func(o *parseOptions) { o.expansionParent = parent }
+}
+
+// WithExpandFromOSEnv enables variable expansion (like [WithExpand]) and
+// resolves references not defined in the file against the process
+// environment via [os.LookupEnv]. It is equivalent to
+// `WithExpand()` plus `WithExpansionParent(<an os.LookupEnv-backed VarLookup>)`,
+// using only the standard library.
+func WithExpandFromOSEnv() ParseOption {
+	return func(o *parseOptions) {
+		o.expand = true
+		o.expansionParent = osEnvLookup{}
+	}
 }
 
 // WithBackticks accepts backtick-quoted values (motdotla/dotenv dialect).

@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
-
-	"github.com/go-rotini/env"
 )
 
 // scanner is a single-pass byte-level tokenizer over a `.env` source.
@@ -70,8 +68,8 @@ func (s *scanner) advance(n int) {
 	}
 }
 
-func (s *scanner) currentPos() env.Position {
-	return env.Position{
+func (s *scanner) currentPos() Position {
+	return Position{
 		File:   s.opts.filePath,
 		Line:   s.line,
 		Column: s.col,

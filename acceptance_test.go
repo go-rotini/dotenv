@@ -203,9 +203,7 @@ func TestAcceptancePathQueries(t *testing.T) {
 	}
 }
 
-func mustNewSource(t *testing.T, path string) interface {
-	Lookup(string) (string, bool)
-} {
+func mustNewSource(t *testing.T, path string) *dotenv.Source {
 	t.Helper()
 	src, err := dotenv.NewSource(path)
 	if err != nil {

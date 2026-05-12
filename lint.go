@@ -3,8 +3,6 @@ package dotenv
 import (
 	"errors"
 	"strings"
-
-	"github.com/go-rotini/env"
 )
 
 // Severity classifies a [LintIssue].
@@ -34,7 +32,7 @@ func (s Severity) String() string {
 // `export ` prefix, YAML-style `KEY: value`, non-POSIX identifiers
 // (hyphens, dots), or backtick-quoted values.
 type LintIssue struct {
-	Pos      env.Position
+	Pos      Position
 	Rule     string
 	Message  string
 	Severity Severity
@@ -51,7 +49,7 @@ func Lint(data []byte, opts ...ParseOption) ([]LintIssue, error) {
 	}
 
 	var issues []LintIssue
-	collect := func(rule, msg string, pos env.Position, sev Severity) {
+	collect := func(rule, msg string, pos Position, sev Severity) {
 		issues = append(issues, LintIssue{
 			Pos:      pos,
 			Rule:     rule,
@@ -69,7 +67,7 @@ func Lint(data []byte, opts ...ParseOption) ([]LintIssue, error) {
 		if asParseError(err, &pe) {
 			collect("syntax", pe.Message, pe.Pos, SeverityError)
 		} else {
-			collect("syntax", err.Error(), env.Position{}, SeverityError)
+			collect("syntax", err.Error(), Position{}, SeverityError)
 		}
 		return issues, err
 	}
@@ -80,7 +78,7 @@ func asParseError(err error, dst **ParseError) bool {
 	return errors.As(err, dst)
 }
 
-func scanForLintWarnings(src []byte, opts parseOptions, collect func(rule, msg string, pos env.Position, sev Severity)) {
+func scanForLintWarnings(src []byte, opts parseOptions, collect func(rule, msg string, pos Position, sev Severity)) {
 	src = stripUTF8BOM(src)
 	line := 1
 	i := 0
@@ -108,12 +106,12 @@ func scanForLintWarnings(src []byte, opts parseOptions, collect func(rule, msg s
 // lintLine inspects one physical line. Continuation lines of multi-
 // line double-quoted values produce noisy warnings; that's acceptable
 // since multi-line values aren't in the portable subset either.
-func lintLine(raw string, lineNo int, opts parseOptions, collect func(rule, msg string, pos env.Position, sev Severity)) {
+func lintLine(raw string, lineNo int, opts parseOptions, collect func(rule, msg string, pos Position, sev Severity)) {
 	trimmed := strings.TrimLeft(raw, " \t")
 	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 		return
 	}
-	pos := env.Position{File: opts.filePath, Line: lineNo, Column: 1}
+	pos := Position{File: opts.filePath, Line: lineNo, Column: 1}
 
 	if strings.HasPrefix(trimmed, "export ") {
 		collect("export-prefix", "`export ` prefix is not portable to motdotla/dotenv",
