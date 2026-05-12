@@ -166,6 +166,18 @@ func TestMarshal_SetUpdatePreservesLineEnding(t *testing.T) {
 	}
 }
 
+func TestMarshal_SetAppendMatchesLineEnding(t *testing.T) {
+	f, err := Parse([]byte("A=1\r\nB=2\r\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Set("C", "3")
+	got, _ := f.Marshal()
+	if string(got) != "A=1\r\nB=2\r\nC=3\r\n" {
+		t.Errorf("got %q, want %q", got, "A=1\r\nB=2\r\nC=3\r\n")
+	}
+}
+
 func TestSet_PanicsOnInvalidKey(t *testing.T) {
 	f, _ := Parse([]byte("A=1\n"))
 	for _, bad := range []string{"", "1FOO", "HAS SPACE", "A=B", "A#B", "-LEAD", `A"B`, "A\nB"} {

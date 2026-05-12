@@ -2,6 +2,7 @@ package dotenv_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,6 +87,10 @@ func runOneDialectFixture(t *testing.T, envPath, expectedPath string, opts []dot
 	if expected.Error != nil {
 		if parseErr == nil {
 			t.Errorf("expected error %q, got nil; map=%v", *expected.Error, file.ToMap())
+			return
+		}
+		if sentinel := dialectErrorSentinel(*expected.Error); sentinel != nil && !errors.Is(parseErr, sentinel) {
+			t.Errorf("error does not match expected %s: %v", *expected.Error, parseErr)
 		}
 		return
 	}
@@ -95,6 +100,20 @@ func runOneDialectFixture(t *testing.T, envPath, expectedPath string, opts []dot
 	got := file.ToMap()
 	if !mapsEqual(got, expected.Result) {
 		t.Errorf("parse map mismatch:\n  got=%v\n want=%v", got, expected.Result)
+	}
+}
+
+// dialectErrorSentinel maps a fixture's `error` string to the package
+// sentinel it must match, or nil if the string isn't a recognized class
+// (in which case only the presence of an error is asserted).
+func dialectErrorSentinel(name string) error {
+	switch name {
+	case "ErrParse":
+		return dotenv.ErrParse
+	case "ErrExpansion":
+		return dotenv.ErrExpansion
+	default:
+		return nil
 	}
 }
 

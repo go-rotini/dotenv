@@ -219,6 +219,14 @@ func TestExpand_MaxDepth(t *testing.T) {
 	if !errors.Is(err, ErrExpansion) {
 		t.Errorf("err = %v, want ExpansionError", err)
 	}
+	if !errors.Is(err, ErrMaxExpansionDepth) {
+		t.Errorf("err = %v, want cause ErrMaxExpansionDepth", err)
+	}
+	// Non-positive bound keeps the default (16), so this resolves fine.
+	f := mustParse(t, src, WithExpand(), WithMaxExpansionDepth(0))
+	if v, _ := f.Get("FOO"); v != "deep" {
+		t.Errorf("FOO = %q with default depth, want deep", v)
+	}
 }
 
 // --- expansion not running without WithExpand ---

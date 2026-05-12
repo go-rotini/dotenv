@@ -44,9 +44,10 @@ func WithStrictExpansion() ParseOption {
 // WithMaxExpansionDepth bounds variable-expansion recursion. Default 16; a
 // non-positive value keeps the default. The bound is reached by deeply
 // nested or self-referential `${VAR:-default}` / `${VAR:?msg}` constructs
-// (e.g. `${A:-${A:-${A}}}`); exceeding it yields an [*ExpansionError].
-// Plain references like `${A}` (and even `A=${A}`) are resolved at most
-// once against already-resolved entries and never recurse.
+// (e.g. `${A:-${A:-${A}}}`); exceeding it yields an [*ExpansionError] whose
+// cause is [ErrMaxExpansionDepth]. Plain references like `${A}` (and even
+// `A=${A}`) are resolved at most once against already-resolved entries and
+// never recurse.
 func WithMaxExpansionDepth(n int) ParseOption {
 	return func(o *parseOptions) {
 		if n > 0 {
@@ -108,6 +109,17 @@ func WithMaxLineLength(n int) ParseOption {
 
 // WithRelaxedNames accepts identifiers containing characters outside the
 // POSIX [A-Za-z_][A-Za-z0-9_]* class (hyphens, dots, non-ASCII).
+//
+// Interaction with [WithExpand]: a `${...}` reference is always parsed with
+// the Bash `${VAR-default}` / `${VAR:-default}` rules, so a hyphen inside the
+// braces is treated as the default-value operator, not as part of the name —
+// `${MY-KEY}` means "value of MY, or the literal `KEY` if MY is unset", even
+// if a key literally named `MY-KEY` exists. A hyphenated key therefore cannot
+// be interpolated via `${...}`; reference it through a parent ([WithExpansionParent])
+// keyed on the hyphenated name, or avoid hyphens in keys you interpolate. (`$NAME`
+// without braces only ever consumes POSIX identifier bytes, so `$MY-KEY`
+// is `<value of MY>` followed by the literal `-KEY` regardless of this option.)
+// Dots in names do not collide with any expansion operator.
 func WithRelaxedNames() ParseOption {
 	return func(o *parseOptions) { o.relaxedNames = true }
 }

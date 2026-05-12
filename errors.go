@@ -35,10 +35,9 @@ func (*ParseError) Is(target error) bool {
 // variable under [WithStrictExpansion], a `${VAR:?msg}` assertion
 // failure, or the [WithMaxExpansionDepth] bound being exceeded by a
 // deeply nested or self-referential `${VAR:-default}` / `${VAR:?msg}`
-// construct. For the first two cases, [ExpansionError.Cause] (and hence
-// [errors.Is]) is [ErrUnsetVariable] or [ErrAssertionFailed]
-// respectively; for a depth-bound violation Cause is nil (match on
-// [ErrExpansion] / `*ExpansionError`).
+// construct. [ExpansionError.Cause] (and hence [errors.Is]) is
+// [ErrUnsetVariable], [ErrAssertionFailed], or [ErrMaxExpansionDepth]
+// respectively; every ExpansionError also matches [ErrExpansion].
 type ExpansionError struct {
 	Pos      Position
 	Variable string
@@ -94,4 +93,8 @@ var (
 	// ErrAssertionFailed is the [ExpansionError.Cause] when a `${VAR:?msg}`
 	// assertion fails during expansion.
 	ErrAssertionFailed = errors.New("dotenv: ${VAR:?...} assertion failed")
+
+	// ErrMaxExpansionDepth is the [ExpansionError.Cause] when expansion
+	// recursion exceeds the [WithMaxExpansionDepth] bound.
+	ErrMaxExpansionDepth = errors.New("dotenv: variable-expansion depth limit exceeded")
 )

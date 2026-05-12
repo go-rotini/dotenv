@@ -90,8 +90,10 @@ if err := loader.Load(&cfg); err != nil {
 ```
 
 `dotenv.NewReaderSource(io.Reader, ...ParseOption)` builds a `*Source` from an already-open
-stream. Both take a snapshot at construction. `(*Source).Lookup` and `(*Source).ToMap`
-are the only methods.
+stream; `dotenv.MapSource(map[string]string)` from an in-memory map (handy as a
+`WithExpansionParent`). All take a snapshot at construction. `*Source` has `Lookup`,
+`Keys`, and `ToMap`. If you already have a `*File` (from `Parse`) and also want a loader
+source, call `f.Source()` — no re-parsing.
 
 ### Lossless editing
 
@@ -108,10 +110,12 @@ os.WriteFile(".env", out, 0o600)
 ```
 
 `Set` panics if the key isn't a valid `.env` key (`dotenv.IsValidKey` is the predicate).
-It updates an existing assignment in place — preserving that line's original line ending —
-or appends a new one (terminating the previous last line first if the source lacked a
-trailing newline). `Marshal` reflects `Set`/`Delete` mutations, not variable expansion
-performed at parse time (use `ToMap`/`Get` for expanded values).
+It updates the **first** assignment of the key in place — preserving that line's original
+line ending — and removes any later assignments of the same key, so `Get`/`ToMap` agree
+with the value just set; if the key is absent it appends a new line (matching the source's
+line ending, and terminating the previous last line first if the source lacked a trailing
+newline). `Marshal` reflects `Set`/`Delete` mutations, not variable expansion performed at
+parse time (use `ToMap`/`Get` for expanded values).
 
 ### Lint
 
@@ -145,8 +149,8 @@ for _, iss := range issues {
   file path and line/column (`ParseError.Pos`, a `dotenv.Position`).
 - `*ExpansionError` (`errors.Is(err, dotenv.ErrExpansion)`) — variable-expansion failure.
   Its `Cause` is `dotenv.ErrUnsetVariable` for an unset reference under strict expansion,
-  `dotenv.ErrAssertionFailed` for a failed `${VAR:?msg}` assertion, or `nil` when the
-  `WithMaxExpansionDepth` bound was exceeded.
+  `dotenv.ErrAssertionFailed` for a failed `${VAR:?msg}` assertion, or
+  `dotenv.ErrMaxExpansionDepth` when the `WithMaxExpansionDepth` bound was exceeded.
 - `dotenv.ErrFileTooLarge`, `dotenv.ErrLineTooLong` — resource-limit violations.
 
 ## Documentation

@@ -3,6 +3,7 @@ package dotenv
 import (
 	"maps"
 	"os"
+	"slices"
 )
 
 // VarLookup resolves a variable name to its value. It is the contract
@@ -13,7 +14,7 @@ import (
 // so env.OSEnv(), env.Map(...), and any other env.Source satisfy VarLookup —
 // dotenv does not import env to make that work. (For the common "resolve
 // against the process environment" case, prefer [WithExpandFromOSEnv], which
-// needs no argument.)
+// needs no argument; for an in-memory map, [MapSource] returns a VarLookup.)
 type VarLookup interface {
 	// Lookup returns the value associated with key and whether the key is
 	// set. ok=true with an empty value means "set but empty".
@@ -21,10 +22,10 @@ type VarLookup interface {
 }
 
 // Source is an in-memory key/value view of a parsed `.env` file, returned by
-// [NewSource] and [NewReaderSource]. It is a snapshot taken at construction;
-// later changes to the underlying file do not propagate (for live reload,
-// layer a file watcher — e.g. from github.com/go-rotini/fs — over [Parse] and
-// re-derive the source on change).
+// [NewSource] / [NewReaderSource] / [MapSource] / [(*File).Source]. It is a
+// snapshot taken at construction; later changes to the underlying file do not
+// propagate (for live reload, layer a file watcher — e.g. from
+// github.com/go-rotini/fs — over [Parse] and re-derive the source on change).
 //
 // (*Source).Lookup makes *Source structurally compatible with the Source
 // interface in github.com/go-rotini/env, so a parsed `.env` file drops
@@ -44,6 +45,19 @@ func (s *Source) Lookup(key string) (value string, ok bool) {
 	return v, ok
 }
 
+// Keys returns the source's keys in sorted order.
+func (s *Source) Keys() []string {
+	if s == nil {
+		return nil
+	}
+	out := make([]string, 0, len(s.m))
+	for k := range s.m {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
+}
+
 // ToMap returns a copy of the source's key/value pairs (last-write-wins per
 // Bash convention, as resolved at parse time).
 func (s *Source) ToMap() map[string]string {
@@ -51,6 +65,13 @@ func (s *Source) ToMap() map[string]string {
 		return nil
 	}
 	return maps.Clone(s.m)
+}
+
+// MapSource returns a [*Source] over a copy of m. It is handy for supplying an
+// in-memory parent to [WithExpansionParent], or in tests. The returned Source
+// is independent of m — later changes to m are not reflected.
+func MapSource(m map[string]string) *Source {
+	return &Source{m: maps.Clone(m)}
 }
 
 // osEnvLookup is the [VarLookup] used by [WithExpandFromOSEnv]; it reads the

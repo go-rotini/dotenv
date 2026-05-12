@@ -94,11 +94,14 @@ func (f *File) Get(key string) (value string, ok bool) {
 	return "", false
 }
 
-// Set assigns value to key. An existing assignment is updated in place
-// (re-rendered with sensible-default quoting, keeping the line's original
-// line ending); otherwise a new assignment is appended on its own line.
-// Surrounding entries keep their original bytes, so round-trip is
-// byte-exact except for the mutated/added line.
+// Set assigns value to key. If key already appears, its first assignment is
+// updated in place (re-rendered with sensible-default quoting, keeping that
+// line's original line ending) and any later assignments of the same key are
+// removed — so the file holds a single authoritative assignment and
+// [File.Get] / [File.ToMap] agree with the value just set. If key is absent,
+// a new assignment is appended on its own line, matching the line ending the
+// source's last line uses. Surrounding entries keep their original bytes, so
+// round-trip is byte-exact except for the mutated/added line.
 //
 // Set panics if key is not a valid `.env` key (see [IsValidKey]).
 func (f *File) Set(key, value string) {
@@ -108,17 +111,39 @@ func (f *File) Set(key, value string) {
 	if !IsValidKey(key) {
 		panic(fmt.Sprintf("dotenv: Set: invalid key %q", key))
 	}
+
+	first := -1
 	for i := range f.entries {
 		if f.entries[i].Kind == EntryAssignment && f.entries[i].Key == key {
-			f.entries[i].Value = value
-			f.entries[i].raw = renderAssignmentLine(key, value, trailingLineEnding(f.entries[i].raw))
-			return
+			first = i
+			break
 		}
 	}
-	// Appending: terminate the current last line first so the new entry
-	// doesn't get concatenated onto it (sources without a trailing newline).
+	if first >= 0 {
+		f.entries[first].Value = value
+		f.entries[first].raw = renderAssignmentLine(key, value, trailingLineEnding(f.entries[first].raw))
+		// Drop any later assignments for the same key (in-place filter).
+		kept := f.entries[:first+1]
+		for _, e := range f.entries[first+1:] {
+			if e.Kind == EntryAssignment && e.Key == key {
+				continue
+			}
+			kept = append(kept, e)
+		}
+		f.entries = kept
+		return
+	}
+
+	// Absent — append a new assignment, terminating the current last line
+	// first if the source lacked a trailing newline so the new entry isn't
+	// concatenated onto it.
+	end := "\n"
 	if n := len(f.entries); n > 0 {
-		if last := &f.entries[n-1]; len(last.raw) > 0 && trailingLineEnding(last.raw) == "" {
+		last := &f.entries[n-1]
+		switch e := trailingLineEnding(last.raw); {
+		case e != "":
+			end = e
+		case len(last.raw) > 0:
 			last.raw = append(last.raw, '\n')
 		}
 	}
@@ -126,7 +151,7 @@ func (f *File) Set(key, value string) {
 		Kind:  EntryAssignment,
 		Key:   key,
 		Value: value,
-		raw:   renderAssignmentLine(key, value, "\n"),
+		raw:   renderAssignmentLine(key, value, end),
 	})
 }
 
@@ -221,4 +246,13 @@ func (f *File) ToMap() map[string]string {
 		}
 	}
 	return out
+}
+
+// Source returns a [*Source] over the file's effective key/value mapping
+// ([File.ToMap]) — a snapshot independent of the AST, so later [File.Set] /
+// [File.Delete] calls do not change it. Use this when you parsed for editing
+// but also want a value to hand to an environment-variable loader without
+// re-parsing.
+func (f *File) Source() *Source {
+	return &Source{m: f.ToMap()}
 }

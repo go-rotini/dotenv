@@ -147,7 +147,7 @@ func (s *scanner) scanAssignment(physStart int) (Entry, error) {
 		if s.opts.strictDotenv {
 			return Entry{}, &ParseError{Pos: startPos, Message: "export prefix not allowed in strict mode"}
 		}
-		s.advance(len("export "))
+		s.advance(len(exportPrefix))
 		for !s.done() && (s.peek() == ' ' || s.peek() == '\t') {
 			s.advance(1)
 		}
@@ -415,17 +415,15 @@ func (s *scanner) checkLineLength(physStart int) error {
 	return nil
 }
 
+var exportPrefix = []byte("export ")
+
 // hasExportPrefix reports whether b begins with "export " followed by
 // an identifier-start byte.
 func hasExportPrefix(b []byte) bool {
-	const prefix = "export "
-	if !bytes.HasPrefix(b, []byte(prefix)) {
+	if len(b) <= len(exportPrefix) || !bytes.HasPrefix(b, exportPrefix) {
 		return false
 	}
-	if len(b) <= len(prefix) {
-		return false
-	}
-	return isIdentifierStart(b[len(prefix)], false)
+	return isIdentifierStart(b[len(exportPrefix)], false)
 }
 
 // isLineEnding reports whether c is LF or CR.

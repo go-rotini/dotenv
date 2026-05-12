@@ -122,7 +122,6 @@ linters:
 
     wrapcheck:
       ignore-interface-regexps:
-        - "Source"
         - "io\\.Reader"
         - "io\\.Writer"
       ignore-sig-regexps:

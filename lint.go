@@ -42,6 +42,13 @@ type LintIssue struct {
 // `.env` subset. The returned slice may contain warnings even when
 // err is non-nil — warnings encountered before a parse failure are
 // preserved.
+//
+// Warnings ([SeverityWarning] entries) come from a fast surface scan, not
+// from the real parser, so on malformed input they can be approximate or
+// diverge from what [Parse] reports; the returned error is authoritative for
+// "does this parse". When parsing fails, the failure is reported both as a
+// [SeverityError] entry (carrying the failure [Position]) and as the returned
+// error.
 func Lint(data []byte, opts ...ParseOption) ([]LintIssue, error) {
 	o := defaultParseOptions()
 	for _, opt := range opts {

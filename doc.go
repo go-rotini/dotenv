@@ -11,10 +11,12 @@
 // # API summary
 //
 //   - [Parse] / [Load]                — bytes / file → AST or key/value map.
-//   - [NewSource] / [NewReaderSource] — file / reader → [*Source].
+//   - [NewSource] / [NewReaderSource] / [MapSource] — file / reader / map → [*Source].
 //   - [Lint]                          — flag non-portable constructs.
 //   - [File].Get/Set/Delete/Keys/ToMap — AST navigation and mutation.
+//   - [File].Source                   — snapshot the AST's effective map as a [*Source].
 //   - [File].Marshal                  — byte-exact round-trip emission.
+//   - [IsValidKey]                    — predicate for keys [File.Set] accepts.
 //
 // # Dependencies
 //

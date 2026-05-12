@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 // --- Load (file → map) ---
@@ -54,6 +55,30 @@ func TestParse_HappyPath(t *testing.T) {
 	}
 	if v, _ := f.Get("FOO"); v != "bar" {
 		t.Errorf("got %q", v)
+	}
+}
+
+func TestParse_MaxLineLengthDisabled(t *testing.T) {
+	src := []byte("FOO=a-fairly-long-value\n") // 24 bytes
+	if _, err := Parse(src, WithMaxLineLength(5)); !errors.Is(err, ErrLineTooLong) {
+		t.Errorf("err = %v, want ErrLineTooLong with limit 5", err)
+	}
+	for _, n := range []int{0, -1} {
+		if _, err := Parse(src, WithMaxLineLength(n)); err != nil {
+			t.Errorf("WithMaxLineLength(%d) should disable the limit: %v", n, err)
+		}
+	}
+}
+
+func TestParse_MaxFileSizeDisabled(t *testing.T) {
+	src := []byte("FOO=value\n") // 10 bytes
+	if _, err := Parse(src, WithMaxFileSize(5)); !errors.Is(err, ErrFileTooLarge) {
+		t.Errorf("err = %v, want ErrFileTooLarge with limit 5", err)
+	}
+	for _, n := range []int64{0, -1} {
+		if _, err := Parse(src, WithMaxFileSize(n)); err != nil {
+			t.Errorf("WithMaxFileSize(%d) should disable the limit: %v", n, err)
+		}
 	}
 }
 
@@ -150,6 +175,17 @@ func TestNewReaderSource_ParseError(t *testing.T) {
 	_, err := NewReaderSource(r)
 	if !errors.Is(err, ErrParse) {
 		t.Errorf("err = %v, want ErrParse", err)
+	}
+}
+
+func TestNewReaderSource_ReadError(t *testing.T) {
+	boom := errors.New("boom")
+	_, err := NewReaderSource(iotest.ErrReader(boom))
+	if err == nil {
+		t.Fatal("expected an error from a failing reader")
+	}
+	if !errors.Is(err, boom) {
+		t.Errorf("err = %v, want it to wrap the reader error", err)
 	}
 }
 

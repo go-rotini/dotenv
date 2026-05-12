@@ -51,6 +51,7 @@ func expandWithDepth(s string, pos Position, opts parseOptions, resolved map[str
 		return "", &ExpansionError{
 			Pos:    pos,
 			Reason: fmt.Sprintf("max expansion depth %d exceeded", opts.maxExpansionDepth),
+			Cause:  ErrMaxExpansionDepth,
 		}
 	}
 	var b strings.Builder

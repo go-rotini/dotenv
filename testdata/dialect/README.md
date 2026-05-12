@@ -29,6 +29,11 @@ Or for fixtures expected to fail:
 ```json
 {
   "result": null,
-  "error":  "ErrSyntax"
+  "error":  "ErrParse"
 }
 ```
+
+The `error` value names the package sentinel the failure must match — `ErrParse`
+for a malformed source, `ErrExpansion` for an expansion failure; `TestDialectCompat`
+asserts `errors.Is(err, <that sentinel>)`. Any other non-empty string means "expect
+some error" without checking the class.
