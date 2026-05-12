@@ -33,9 +33,12 @@ func (*ParseError) Is(target error) bool {
 
 // ExpansionError is returned when variable expansion fails: an unset
 // variable under [WithStrictExpansion], a `${VAR:?msg}` assertion
-// failure, a depth-bound exceeded, or a reference cycle. For the first
-// two cases, [ExpansionError.Cause] (and hence [errors.Is]) is
-// [ErrUnsetVariable] or [ErrAssertionFailed] respectively.
+// failure, or the [WithMaxExpansionDepth] bound being exceeded by a
+// deeply nested or self-referential `${VAR:-default}` / `${VAR:?msg}`
+// construct. For the first two cases, [ExpansionError.Cause] (and hence
+// [errors.Is]) is [ErrUnsetVariable] or [ErrAssertionFailed]
+// respectively; for a depth-bound violation Cause is nil (match on
+// [ErrExpansion] / `*ExpansionError`).
 type ExpansionError struct {
 	Pos      Position
 	Variable string

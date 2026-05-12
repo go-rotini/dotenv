@@ -10,8 +10,12 @@ import (
 // for sentinel-marked positions and never recurses into them.
 //
 // U+0007 (BELL) is used because env values practically never contain
-// it; user-supplied BELL bytes pass through unaffected (they don't
-// precede a `$`).
+// it. Known limitation: a *user-supplied* literal U+0007 byte that
+// happens to immediately precede a `$` in an expansion-eligible value
+// is misread as a `\$` escape (the BELL is dropped and the following
+// reference is suppressed). The clean fix is to record suppressed-`$`
+// offsets on the Entry out of band rather than via an in-band byte;
+// until then this edge case is accepted as a non-issue in practice.
 const dollarSuppressSentinel = 0x07
 
 // expandAll runs variable expansion over every assignment entry in
@@ -268,9 +272,11 @@ func isVarRefByte(c byte) bool {
 }
 
 // lookupVar resolves name against the file's already-parsed entries
-// first, then any [WithExpansionParent] source. Cycles like
-// `${A:-${A:-${A}}}` are bounded by [WithMaxExpansionDepth] and
-// surface as an ExpansionError when the cap is reached.
+// first, then any [WithExpansionParent] source. Only entries resolved
+// *before* the current one are visible, so a plain self-reference
+// (`A=${A}`) sees A as unset rather than recursing; pathological nested
+// defaults (`${A:-${A:-${A}}}`) are bounded by [WithMaxExpansionDepth]
+// and surface as an [*ExpansionError] when the cap is reached.
 func lookupVar(name string, opts parseOptions, resolved map[string]string) (string, bool) {
 	if v, ok := resolved[name]; ok {
 		return v, true

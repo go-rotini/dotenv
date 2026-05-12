@@ -1,6 +1,9 @@
 package dotenv
 
-import "slices"
+import (
+	"fmt"
+	"slices"
+)
 
 // EntryKind classifies one logical line in a `.env` file.
 type EntryKind int
@@ -48,6 +51,11 @@ type Entry struct {
 // File is the AST for a parsed `.env` source. Entry order and per-
 // entry source bytes are preserved so [File.Marshal] is byte-exact on
 // unmutated inputs.
+//
+// A File returned by [Parse] / [Load] / [NewSource] is safe for
+// concurrent reads ([File.Get], [File.Keys], [File.ToMap], [File.Entries],
+// [File.Marshal]), but the mutating methods ([File.Set], [File.Delete])
+// are not — guard a File you intend to mutate from concurrent goroutines.
 type File struct {
 	entries []Entry
 	path    string
@@ -86,19 +94,32 @@ func (f *File) Get(key string) (value string, ok bool) {
 	return "", false
 }
 
-// Set assigns value to key. An existing assignment is updated in
-// place; otherwise a new assignment is appended. The new value is
-// rendered with sensible-default quoting; round-trip is byte-exact
-// except for the mutated line.
+// Set assigns value to key. An existing assignment is updated in place
+// (re-rendered with sensible-default quoting, keeping the line's original
+// line ending); otherwise a new assignment is appended on its own line.
+// Surrounding entries keep their original bytes, so round-trip is
+// byte-exact except for the mutated/added line.
+//
+// Set panics if key is not a valid `.env` key (see [IsValidKey]).
 func (f *File) Set(key, value string) {
 	if f == nil {
 		return
 	}
+	if !IsValidKey(key) {
+		panic(fmt.Sprintf("dotenv: Set: invalid key %q", key))
+	}
 	for i := range f.entries {
 		if f.entries[i].Kind == EntryAssignment && f.entries[i].Key == key {
 			f.entries[i].Value = value
-			f.entries[i].raw = renderAssignmentLine(key, value, "\n")
+			f.entries[i].raw = renderAssignmentLine(key, value, trailingLineEnding(f.entries[i].raw))
 			return
+		}
+	}
+	// Appending: terminate the current last line first so the new entry
+	// doesn't get concatenated onto it (sources without a trailing newline).
+	if n := len(f.entries); n > 0 {
+		if last := &f.entries[n-1]; len(last.raw) > 0 && trailingLineEnding(last.raw) == "" {
+			last.raw = append(last.raw, '\n')
 		}
 	}
 	f.entries = append(f.entries, Entry{
@@ -107,6 +128,46 @@ func (f *File) Set(key, value string) {
 		Value: value,
 		raw:   renderAssignmentLine(key, value, "\n"),
 	})
+}
+
+// IsValidKey reports whether key is a syntactically valid `.env` key — one
+// that round-trips through [Parse] when [WithRelaxedNames] is in effect. A
+// valid key is non-empty, does not begin with a digit, and otherwise
+// contains only identifier bytes: ASCII letters, digits and '_', plus —
+// beyond the portable POSIX subset [A-Za-z_][A-Za-z0-9_]* — '-', '.', and
+// non-ASCII bytes. [(*File).Set] panics on an invalid key. (Keys outside the
+// POSIX subset only re-parse under [WithRelaxedNames]; the POSIX subset is
+// always safe.)
+func IsValidKey(key string) bool {
+	if key == "" || !isIdentifierStart(key[0], true) {
+		return false
+	}
+	for i := 1; i < len(key); i++ {
+		if !isIdentifierByte(key[i], true) {
+			return false
+		}
+	}
+	return true
+}
+
+// trailingLineEnding returns the line terminator at the end of raw —
+// "\r\n", "\r", "\n", or "" when raw does not end with a line ending.
+func trailingLineEnding(raw []byte) string {
+	n := len(raw)
+	if n == 0 {
+		return ""
+	}
+	switch raw[n-1] {
+	case '\n':
+		if n >= 2 && raw[n-2] == '\r' {
+			return "\r\n"
+		}
+		return "\n"
+	case '\r':
+		return "\r"
+	default:
+		return ""
+	}
 }
 
 // Delete removes every assignment for key. Returns true when at least

@@ -174,6 +174,43 @@ func TestExpand_FilePrecedesParent(t *testing.T) {
 	}
 }
 
+// --- WithExpandFromOSEnv ---
+
+func TestExpand_FromOSEnv(t *testing.T) {
+	t.Setenv("DOTENV_TEST_FROM_OSENV", "the-os-value")
+	f := mustParse(t, "FOO=${DOTENV_TEST_FROM_OSENV}\nBAR=${DOTENV_TEST_DEFINITELY_NOT_SET}\n", WithExpandFromOSEnv())
+	if v, _ := f.Get("FOO"); v != "the-os-value" {
+		t.Errorf("FOO = %q, want the-os-value", v)
+	}
+	if v, _ := f.Get("BAR"); v != "" {
+		t.Errorf("BAR = %q, want empty (unset OS var under lenient expand)", v)
+	}
+}
+
+func TestExpand_FromOSEnvImpliesExpand(t *testing.T) {
+	t.Setenv("DOTENV_TEST_X", "y")
+	// WithExpandFromOSEnv enables expansion on its own — no separate WithExpand.
+	f := mustParse(t, "FOO=$DOTENV_TEST_X\n", WithExpandFromOSEnv())
+	if v, _ := f.Get("FOO"); v != "y" {
+		t.Errorf("FOO = %q, want y", v)
+	}
+}
+
+func TestExpand_FromOSEnvStrictUnsetErrors(t *testing.T) {
+	_, err := Parse([]byte("FOO=${DOTENV_TEST_NOPE}\n"), WithExpandFromOSEnv(), WithStrictExpansion())
+	if !errors.Is(err, ErrUnsetVariable) {
+		t.Errorf("err = %v, want ErrUnsetVariable", err)
+	}
+}
+
+func TestExpand_FileEntriesBeatOSEnv(t *testing.T) {
+	t.Setenv("DOTENV_TEST_BOTH", "from-os")
+	f := mustParse(t, "DOTENV_TEST_BOTH=from-file\nFOO=${DOTENV_TEST_BOTH}\n", WithExpandFromOSEnv())
+	if v, _ := f.Get("FOO"); v != "from-file" {
+		t.Errorf("FOO = %q, want from-file (file entry beats OS env)", v)
+	}
+}
+
 // --- WithMaxExpansionDepth ---
 
 func TestExpand_MaxDepth(t *testing.T) {

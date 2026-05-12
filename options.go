@@ -34,16 +34,19 @@ func WithExpand() ParseOption {
 	return func(o *parseOptions) { o.expand = true }
 }
 
-// WithStrictExpansion makes a reference to an unset variable raise a
-// [*ExpansionError] rather than expand to empty. Has no effect unless
-// [WithExpand] is also set.
+// WithStrictExpansion makes a reference to an unset variable raise an
+// [*ExpansionError] (cause [ErrUnsetVariable]) rather than expand to empty.
+// Has no effect unless [WithExpand] (or [WithExpandFromOSEnv]) is also set.
 func WithStrictExpansion() ParseOption {
 	return func(o *parseOptions) { o.strictExpansion = true }
 }
 
-// WithMaxExpansionDepth bounds variable-expansion recursion. Default 16.
-// Cycles surface as [*ExpansionError] before the bound is exceeded; the
-// bound itself only matters for genuinely deep but non-cyclic references.
+// WithMaxExpansionDepth bounds variable-expansion recursion. Default 16; a
+// non-positive value keeps the default. The bound is reached by deeply
+// nested or self-referential `${VAR:-default}` / `${VAR:?msg}` constructs
+// (e.g. `${A:-${A:-${A}}}`); exceeding it yields an [*ExpansionError].
+// Plain references like `${A}` (and even `A=${A}`) are resolved at most
+// once against already-resolved entries and never recurse.
 func WithMaxExpansionDepth(n int) ParseOption {
 	return func(o *parseOptions) {
 		if n > 0 {

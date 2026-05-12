@@ -9,12 +9,14 @@ import (
 
 // Fuzz targets for the dotenv package. The contract is:
 //
-//  1. No panic for any input.
+//  1. No panic for any input (Set is exempt — it panics on an invalid
+//     key by contract; the edit fuzzer only ever passes valid keys).
 //  2. No infinite loop.
-//  3. For round-trip fuzzers: Parse → Marshal → Parse produces the
-//     same effective key/value map.
+//  3. For round-trip fuzzers: Parse → (edit) → Marshal → Parse
+//     produces a consistent effective key/value map.
 //
-// Seed corpora live in dotenv/testdata/fuzz/{TestName}/.
+// Seeds are supplied in code via f.Add; `go test -fuzz` writes any
+// minimized crashers it finds to testdata/fuzz/{TestName}/.
 
 // scannerSeeds covers BOM/CRLF/quoting/escape/expansion forms plus
 // known regression cases.
@@ -135,6 +137,51 @@ func FuzzRoundTrip(f *testing.F) {
 				t.Fatalf("second round-trip not byte-stable:\n  once=%q\n twice=%q",
 					string(marshaled), string(again))
 			}
+		}
+	})
+}
+
+// FuzzMarshalEdit exercises the AST-mutation path the plain FuzzRoundTrip
+// never reaches: Parse → Delete → Set → Marshal → re-Parse. The re-parsed
+// file must (a) parse without error and (b) report the just-Set key with
+// exactly the value it was given. This covers, in particular, appending to
+// a source that lacks a trailing newline.
+func FuzzMarshalEdit(f *testing.F) {
+	for _, s := range [][]byte{
+		[]byte("A=1\nB=2\n"),
+		[]byte("A=1\nB=2"), // no trailing newline
+		[]byte(""),         // empty file
+		[]byte("# only a comment"),
+		[]byte("A=1\r\nB=2\r\n"), // CRLF
+		[]byte("FUZZ_INSERTED_KEY=already-here\nA=1\n"),
+		[]byte("A='single'\nB=\"double\\n\"\nC=value # comment\n"),
+	} {
+		f.Add(s)
+	}
+	const key = "FUZZ_INSERTED_KEY"
+	f.Fuzz(func(t *testing.T, data []byte) {
+		file, err := dotenv.Parse(data)
+		if err != nil {
+			return // ill-formed inputs are out of scope.
+		}
+		file.Delete(key) // guarantee a single occurrence after Set
+		file.Set(key, string(data))
+
+		marshaled, err := file.Marshal()
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		got, err := dotenv.Parse(marshaled)
+		if err != nil {
+			t.Fatalf("re-parse of Marshal output failed: %v\n--- bytes ---\n%q", err, string(marshaled))
+		}
+		v, ok := got.Get(key)
+		if !ok {
+			t.Fatalf("re-parsed file is missing the Set key %q\n--- marshaled ---\n%q", key, string(marshaled))
+		}
+		if v != string(data) {
+			t.Fatalf("Set value did not round-trip:\n want %q\n  got %q\n--- marshaled ---\n%q",
+				string(data), v, string(marshaled))
 		}
 	})
 }

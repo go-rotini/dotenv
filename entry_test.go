@@ -101,3 +101,29 @@ func TestFile_EntriesAndPath(t *testing.T) {
 		t.Errorf("Path = %q", f.Path())
 	}
 }
+
+func TestIsValidKey(t *testing.T) {
+	valid := []string{"A", "_", "_x", "FOO", "f00", "FOO_BAR", "with-hyphen", "with.dot", "naïve", "Ω"}
+	invalid := []string{"", "1FOO", "0", "-LEAD", ".lead", "HAS SPACE", "HAS\tTAB", "A=B", "A:B", "A#B", `A"B`, "A'B", "A`B", "A$B", "A\\B", "A\nB", "A\x00B"}
+	for _, k := range valid {
+		if !IsValidKey(k) {
+			t.Errorf("IsValidKey(%q) = false, want true", k)
+		}
+	}
+	for _, k := range invalid {
+		if IsValidKey(k) {
+			t.Errorf("IsValidKey(%q) = true, want false", k)
+		}
+	}
+	// Keys IsValidKey accepts must round-trip through Parse(WithRelaxedNames).
+	for _, k := range valid {
+		f, err := Parse([]byte(k+"=v\n"), WithRelaxedNames())
+		if err != nil {
+			t.Errorf("Parse(%q=v) with WithRelaxedNames: %v", k, err)
+			continue
+		}
+		if got, ok := f.Get(k); !ok || got != "v" {
+			t.Errorf("round-trip of key %q: Get = (%q, %v)", k, got, ok)
+		}
+	}
+}

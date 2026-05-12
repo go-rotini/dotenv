@@ -21,7 +21,7 @@ import (
 // the upstream projects publishes a versioned standalone test corpus.
 func TestDialectCompat(t *testing.T) {
 	t.Parallel()
-	root := dialectRoot(t)
+	root := dialectRoot()
 
 	dialects := []struct {
 		name string
@@ -127,9 +127,8 @@ func mapsEqual(a, b map[string]string) bool {
 	return true
 }
 
-// dialectRoot resolves the absolute path to testdata/dialect/, which
-// lives at the module root (one directory above the dotenv package).
-func dialectRoot(t *testing.T) string {
-	t.Helper()
+// dialectRoot returns the path to testdata/dialect/ (relative to the
+// package directory, which is this module's root).
+func dialectRoot() string {
 	return filepath.Join("testdata", "dialect")
 }

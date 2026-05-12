@@ -115,6 +115,82 @@ func TestMarshal_SetNewAppends(t *testing.T) {
 	}
 }
 
+func TestMarshal_SetAppendsToSourceWithoutTrailingNewline(t *testing.T) {
+	// Source whose last line has no terminator — appending must not glue
+	// the new entry onto it.
+	f, err := Parse([]byte("A=1\nB=2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Set("C", "3")
+	got, err := f.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "A=1\nB=2\nC=3\n" {
+		t.Fatalf("got %q, want %q", got, "A=1\nB=2\nC=3\n")
+	}
+	// And the output must re-parse to the expected map.
+	f2, err := Parse(got)
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	for k, want := range map[string]string{"A": "1", "B": "2", "C": "3"} {
+		if v, ok := f2.Get(k); !ok || v != want {
+			t.Errorf("re-parsed %s = (%q, %v), want (%q, true)", k, v, ok, want)
+		}
+	}
+}
+
+func TestMarshal_SetAppendsToEmptyFile(t *testing.T) {
+	f, err := Parse(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Set("A", "1")
+	got, _ := f.Marshal()
+	if string(got) != "A=1\n" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestMarshal_SetUpdatePreservesLineEnding(t *testing.T) {
+	f, err := Parse([]byte("A=1\r\nB=2\r\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Set("A", "updated")
+	got, _ := f.Marshal()
+	if string(got) != "A=updated\r\nB=2\r\n" {
+		t.Errorf("got %q, want %q", got, "A=updated\r\nB=2\r\n")
+	}
+}
+
+func TestSet_PanicsOnInvalidKey(t *testing.T) {
+	f, _ := Parse([]byte("A=1\n"))
+	for _, bad := range []string{"", "1FOO", "HAS SPACE", "A=B", "A#B", "-LEAD", `A"B`, "A\nB"} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("Set(%q, ...) did not panic", bad)
+				}
+			}()
+			f.Set(bad, "x")
+		}()
+	}
+	// A relaxed-name key (hyphen/dot) is accepted by Set.
+	for _, ok := range []string{"OK", "_x", "with-hyphen", "with.dot"} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Set(%q, ...) panicked: %v", ok, r)
+				}
+			}()
+			f.Set(ok, "v")
+		}()
+	}
+}
+
 func TestMarshal_SetQuotesValueWhenNeeded(t *testing.T) {
 	src := "A=1\n"
 	f, err := Parse([]byte(src))

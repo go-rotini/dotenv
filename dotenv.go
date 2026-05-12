@@ -45,21 +45,11 @@ func Load(path string, opts ...ParseOption) (map[string]string, error) {
 // (*Source).Lookup makes the result usable wherever a github.com/go-rotini/env
 // Source is expected, without dotenv importing env.
 func NewSource(path string, opts ...ParseOption) (*Source, error) {
-	o := defaultParseOptions()
-	for _, opt := range opts {
-		opt(&o)
-	}
-	o.filePath = path
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("dotenv: read %s: %w", path, err)
-	}
-	f, err := parse(data, o)
+	m, err := Load(path, opts...)
 	if err != nil {
 		return nil, err
 	}
-	return &Source{m: f.ToMap()}, nil
+	return &Source{m: m}, nil
 }
 
 // NewReaderSource reads a `.env` byte stream from r and returns a [*Source]

@@ -1,5 +1,9 @@
 .PHONY: all clean lint test test-acceptance test-conformance test-fuzz test-mutation test-race
 
+# Per-fuzzer time budget for `make test-fuzz`. CI uses 60s; pass e.g.
+# FUZZTIME=10s for a quicker local smoke run.
+FUZZTIME ?= 60s
+
 all: clean lint test test-acceptance test-conformance test-fuzz test-mutation test-race
 
 clean:
@@ -27,10 +31,11 @@ test-conformance:
 	@go tool cover -func=test_conformance.out | tail -1
 
 test-fuzz:
-	@go test -fuzz=FuzzScanner -fuzztime=60s -run=^$$ .
-	@go test -fuzz=FuzzParser -fuzztime=60s -run=^$$ .
-	@go test -fuzz=FuzzExpand -fuzztime=60s -run=^$$ .
-	@go test -fuzz=FuzzRoundTrip -fuzztime=60s -run=^$$ .
+	@go test -fuzz=FuzzScanner -fuzztime=$(FUZZTIME) -run=^$$ .
+	@go test -fuzz=FuzzParser -fuzztime=$(FUZZTIME) -run=^$$ .
+	@go test -fuzz=FuzzExpand -fuzztime=$(FUZZTIME) -run=^$$ .
+	@go test -fuzz=FuzzRoundTrip -fuzztime=$(FUZZTIME) -run=^$$ .
+	@go test -fuzz=FuzzMarshalEdit -fuzztime=$(FUZZTIME) -run=^$$ .
 
 test-mutation:
 	@go tool github.com/go-gremlins/gremlins/cmd/gremlins unleash --config .gremlins.yaml
