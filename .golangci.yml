@@ -1,0 +1,236 @@
+version: "2"
+
+linters:
+  default: all
+  disable:
+    # Deprecated
+    - wsl
+
+    # Not applicable to this project
+    - bodyclose
+    - rowserrcheck
+    - sqlclosecheck
+    - noctx
+    - spancheck
+    - zerologlint
+    - loggercheck
+    - promlinter
+    - protogetter
+    - ginkgolinter
+    - testifylint
+    - sloglint
+    - unqueryvet
+    - arangolint
+    - gosmopolitan
+
+    # Too opinionated for a parsing library
+    - exhaustruct
+    - varnamelen
+    - wsl_v5
+    - nlreturn
+    - noinlineerr
+    - godox
+    - depguard
+    - goheader
+    - gomodguard
+    - lll
+    - gochecknoglobals
+    - ireturn          # Parse/NewSource return interface values by design
+    - nonamedreturns
+    - paralleltest
+    - tparallel
+    - testpackage
+    - mnd
+    - funcorder
+    - containedctx
+    - tagliatelle
+    - forbidigo
+    - exhaustive      # switch exhaustiveness on internal kind enums is intentional
+    - recvcheck       # value/pointer receiver mixing is the standard marshal/unmarshal pattern
+
+  settings:
+    cyclop:
+      max-complexity: 25
+
+    gocognit:
+      min-complexity: 40
+
+    gocyclo:
+      min-complexity: 25
+
+    funlen:
+      lines: 120
+      statements: 80
+      ignore-comments: true
+
+    nestif:
+      min-complexity: 10
+
+    goconst:
+      min-len: 5
+      min-occurrences: 5
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+        - opinionated
+      disabled-checks:
+        - hugeParam
+        - rangeValCopy
+        - unnamedResult
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: exported
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: var-declaration
+        - name: var-naming
+
+    errcheck:
+      check-type-assertions: false
+      check-blank: true
+
+    gosec:
+      excludes:
+        - G304
+        - G115
+
+    nakedret:
+      max-func-lines: 10
+
+    misspell:
+      locale: US
+
+    interfacebloat:
+      max: 5
+
+    wrapcheck:
+      ignore-interface-regexps:
+        - "Source"
+        - "io\\.Reader"
+        - "io\\.Writer"
+      ignore-sig-regexps:
+        - "io\\.Writer\\)\\.Write"
+      ignore-package-globs:
+        - "strconv"
+        - "encoding/base64"
+        - "encoding/hex"
+
+    perfsprint:
+      strconcat: false
+
+    godot:
+      scope: toplevel
+
+    maintidx:
+      under: 15
+
+    prealloc:
+      simple: true
+      for-loops: true
+
+    gomoddirectives:
+      # TODO(extract-dotenv): drop these two settings together with the
+      # `replace github.com/go-rotini/env => ../env` directive in go.mod once
+      # go-rotini/env is tagged and dotenv requires a published version.
+      replace-local: true
+      replace-allow-list:
+        - github.com/go-rotini/env
+
+  exclusions:
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - forcetypeassert
+          - dupl
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - goconst
+          - maintidx
+          - wrapcheck
+          - err113
+          - exhaustive
+          - makezero
+          - unparam
+          - nestif
+          - godot
+          - gocritic
+          - prealloc
+          - perfsprint
+          - errorlint
+          - inamedparam
+          - embeddedstructfieldcheck
+          - modernize
+          - unconvert
+          - revive
+          - misspell
+          - intrange
+          - testableexamples
+          - staticcheck
+          - tagalign
+          - errchkjson
+
+      # Parser internals have inherent complexity.
+      - path: scanner\.go
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - maintidx
+          - nestif
+          - unparam
+
+      - path: parser\.go
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - maintidx
+          - nestif
+          - nilnil
+
+      - path: expand\.go
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - nestif
+
+      - path: marshal\.go
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - nestif
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
