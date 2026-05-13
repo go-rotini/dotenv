@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -295,10 +296,14 @@ func TestWrite(t *testing.T) {
 	if string(data) != "BAZ=qux\nFOO=bar\n" {
 		t.Errorf("written = %q", data)
 	}
-	// A newly-created `.env` must not be group/other-accessible.
-	if fi, err := os.Stat(path); err == nil {
-		if perm := fi.Mode().Perm(); perm&0o077 != 0 {
-			t.Errorf("perm %o exposes group/other access", perm)
+	// A newly-created `.env` must not be group/other-accessible. Windows
+	// has no Unix permission bits — os.Stat reports 0666 there regardless
+	// of the mode passed to WriteFile — so the check is POSIX-only.
+	if runtime.GOOS != "windows" {
+		if fi, err := os.Stat(path); err == nil {
+			if perm := fi.Mode().Perm(); perm&0o077 != 0 {
+				t.Errorf("perm %o exposes group/other access", perm)
+			}
 		}
 	}
 	// Invalid key → error wrapping ErrInvalidKey, and the file is not created.
