@@ -1,0 +1,2 @@
+# force LF line endings, CRLF will break tests
+* text=auto eol=lf
