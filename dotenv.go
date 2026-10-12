@@ -8,7 +8,8 @@ import (
 
 // Parse parses data as a `.env` byte stream and returns the resulting
 // AST. Use [File.Get] / [File.Keys] / [File.ToMap] for access, or
-// [File.Marshal] for round-trip emission.
+// [File.Marshal] for round-trip emission. Malformed input yields a
+// [*ParseError]; see [ParseOption] for the size limits and dialect options.
 func Parse(data []byte, opts ...ParseOption) (*File, error) {
 	o := defaultParseOptions()
 	for _, opt := range opts {
@@ -17,8 +18,8 @@ func Parse(data []byte, opts ...ParseOption) (*File, error) {
 	return parse(data, o)
 }
 
-// Load reads a `.env` file from path and returns its key/value map
-// (last-write-wins per Bash convention).
+// Load reads a `.env` file from path and returns its key/value map. When a
+// key is assigned more than once, the last assignment wins.
 func Load(path string, opts ...ParseOption) (map[string]string, error) {
 	o := defaultParseOptions()
 	for _, opt := range opts {
@@ -37,13 +38,9 @@ func Load(path string, opts ...ParseOption) (map[string]string, error) {
 	return f.ToMap(), nil
 }
 
-// NewSource reads a `.env` file from path and returns a [*Source] over its
-// parsed map. The source is a snapshot taken at construction; subsequent file
-// changes do not propagate (for live reload, layer a file watcher — e.g. from
-// github.com/go-rotini/fs — over [Parse] and re-derive the source on change).
-//
-// (*Source).Lookup makes the result usable wherever a github.com/go-rotini/env
-// Source is expected, without dotenv importing env.
+// NewSource reads a `.env` file from path and returns a [*Source] snapshot of
+// its parsed map. The result can be used wherever a github.com/go-rotini/env
+// Source is expected.
 func NewSource(path string, opts ...ParseOption) (*Source, error) {
 	m, err := Load(path, opts...)
 	if err != nil {

@@ -2,6 +2,10 @@ package dotenv
 
 // ParseOption configures [Parse], [Load], [NewSource],
 // [NewReaderSource], and [Lint].
+//
+// By default inputs are limited to 10 MiB ([WithMaxFileSize]) and entries
+// to 1 MiB ([WithMaxLineLength]); exceeding either returns an error wrapping
+// [ErrFileTooLarge] or [ErrLineTooLong].
 type ParseOption func(*parseOptions)
 
 type parseOptions struct {
@@ -87,9 +91,10 @@ func WithBackticks() ParseOption {
 	return func(o *parseOptions) { o.backticks = true }
 }
 
-// WithStrictDotenv rejects non-portable constructs: YAML-style
-// `KEY: value` separators, the `export ` prefix, identifiers outside
-// the POSIX class. Useful for asserting cross-dialect portability.
+// WithStrictDotenv rejects the `export ` prefix and YAML-style `KEY: value`
+// separators, which otherwise parse. It does not override [WithRelaxedNames]
+// or [WithBackticks]: without those options, non-POSIX key names and
+// backtick-quoted values are already rejected.
 func WithStrictDotenv() ParseOption {
 	return func(o *parseOptions) { o.strictDotenv = true }
 }
@@ -100,9 +105,10 @@ func WithMaxFileSize(n int64) ParseOption {
 	return func(o *parseOptions) { o.maxFileSize = n }
 }
 
-// WithMaxLineLength caps a single physical line's length. Default 1 MiB.
-// Zero or negative means unlimited. Multi-line double-quoted values
-// count toward the line limit per physical line, not in aggregate.
+// WithMaxLineLength caps the length in bytes of a single entry, including
+// its line ending. Default 1 MiB. Zero or negative means unlimited. An
+// assignment whose quoted value spans several lines is measured as a whole,
+// not per physical line.
 func WithMaxLineLength(n int) ParseOption {
 	return func(o *parseOptions) { o.maxLineLength = n }
 }

@@ -9,14 +9,13 @@ import (
 )
 
 // Marshal returns the file's source representation. For unmutated
-// inputs the result is byte-exact with the original; entries mutated
-// or added via [File.Set] are freshly rendered with default quoting
-// while surrounding entries retain their original bytes.
+// inputs the result is byte-exact with the original, apart from a leading
+// UTF-8 byte order mark, which is dropped. Entries mutated or added via
+// [File.Set] are freshly rendered with default quoting while surrounding
+// entries retain their original bytes. The error is always nil.
 //
-// Variable expansion performed at parse time (via [WithExpand] /
-// [WithExpandFromOSEnv]) is NOT reflected here — Marshal emits the
-// original source text; only [File.Set] re-renders a line. Use
-// [File.ToMap] / [File.Get] for the expanded values.
+// Variable expansion is not reflected: Marshal emits the original source
+// text. Use [File.ToMap] / [File.Get] for the expanded values.
 func (f *File) Marshal() ([]byte, error) {
 	if f == nil {
 		return nil, nil
@@ -34,9 +33,9 @@ func (f *File) Marshal() ([]byte, error) {
 // re-parses to an equivalent map via [Parse] / [Load].
 //
 // Marshal returns an error wrapping [ErrInvalidKey] if any key is not a valid
-// `.env` key (see [IsValidKey]) — emitting such a key would produce output
-// that fails to re-parse. To turn a parsed [*File] back into bytes (preserving
-// comments and formatting), use [(*File).Marshal] instead.
+// `.env` key (see [IsValidKey]). Keys outside the POSIX subset re-parse only
+// under [WithRelaxedNames]. To turn a parsed [*File] back into bytes
+// (preserving comments and formatting), use [File.Marshal] instead.
 func Marshal(m map[string]string) ([]byte, error) {
 	keys := make([]string, 0, len(m))
 	for k := range m {

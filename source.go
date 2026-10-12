@@ -21,22 +21,21 @@ type VarLookup interface {
 	Lookup(key string) (value string, ok bool)
 }
 
-// Source is an in-memory key/value view of a parsed `.env` file, returned by
-// [NewSource] / [NewReaderSource] / [MapSource] / [(*File).Source]. It is a
-// snapshot taken at construction; later changes to the underlying file do not
-// propagate (for live reload, layer a file watcher — e.g. from
-// github.com/go-rotini/fs — over [Parse] and re-derive the source on change).
+// Source is an immutable key/value snapshot of a parsed `.env` file, returned
+// by [NewSource] / [NewReaderSource] / [MapSource] / [File.Source]. Later
+// changes to the underlying file do not propagate. It is safe for concurrent
+// use.
 //
-// (*Source).Lookup makes *Source structurally compatible with the Source
-// interface in github.com/go-rotini/env, so a parsed `.env` file drops
-// straight into an env loader's source chain without dotenv depending on env.
+// [Source.Lookup] makes *Source structurally compatible with the Source
+// interface in github.com/go-rotini/env, so it can be used directly in an env
+// loader's source chain.
 type Source struct {
 	m map[string]string
 }
 
 // Lookup returns the value associated with key and whether the key is set.
 // An ok=true result with an empty value distinguishes "set but empty" from
-// "unset". Safe for concurrent use; *Source is immutable after construction.
+// "unset". A nil *Source has no keys.
 func (s *Source) Lookup(key string) (value string, ok bool) {
 	if s == nil {
 		return "", false
@@ -58,8 +57,7 @@ func (s *Source) Keys() []string {
 	return out
 }
 
-// ToMap returns a copy of the source's key/value pairs (last-write-wins per
-// Bash convention, as resolved at parse time).
+// ToMap returns a copy of the source's key/value pairs.
 func (s *Source) ToMap() map[string]string {
 	if s == nil {
 		return nil
@@ -67,9 +65,9 @@ func (s *Source) ToMap() map[string]string {
 	return maps.Clone(s.m)
 }
 
-// MapSource returns a [*Source] over a copy of m. It is handy for supplying an
-// in-memory parent to [WithExpansionParent], or in tests. The returned Source
-// is independent of m — later changes to m are not reflected.
+// MapSource returns a [*Source] over a copy of m, for example as an
+// in-memory parent for [WithExpansionParent]. Later changes to m are not
+// reflected.
 func MapSource(m map[string]string) *Source {
 	return &Source{m: maps.Clone(m)}
 }

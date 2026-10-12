@@ -401,9 +401,9 @@ func (s *scanner) consumeLineEnding() {
 	}
 }
 
-// checkLineLength enforces [WithMaxLineLength] against the physical
-// line starting at physStart. Multi-line values aren't measured in
-// aggregate; the leading physical line is the bound.
+// checkLineLength enforces [WithMaxLineLength] against the logical
+// entry starting at physStart, including its line ending; a multi-line
+// quoted value is measured as a whole.
 func (s *scanner) checkLineLength(physStart int) error {
 	if s.opts.maxLineLength <= 0 {
 		return nil

@@ -13,11 +13,12 @@ const (
 	SeverityError Severity = iota
 
 	// SeverityWarning marks a parseable but non-portable construct
-	// (YAML-style `:`, `export` prefix, backtick quoting, hyphenated
-	// identifiers).
+	// (YAML-style `:`, `export` prefix, backtick quoting, hyphens or
+	// dots in identifiers).
 	SeverityWarning
 )
 
+// String returns "error", "warning", or "unknown".
 func (s Severity) String() string {
 	switch s {
 	case SeverityError:
@@ -28,27 +29,33 @@ func (s Severity) String() string {
 	return "unknown"
 }
 
-// LintIssue describes a deviation from the portable `.env` subset:
-// `export ` prefix, YAML-style `KEY: value`, non-POSIX identifiers
-// (hyphens, dots), or backtick-quoted values.
+// LintIssue is one finding from [Lint].
 type LintIssue struct {
-	Pos      Position
-	Rule     string
-	Message  string
+	// Pos is the start of the offending line, or the parse failure's
+	// position for a "syntax" issue (zero when unknown).
+	Pos Position
+
+	// Rule names the check: "export-prefix", "yaml-separator",
+	// "non-posix-identifier", "backtick-value", or "syntax" for a
+	// parse failure.
+	Rule string
+
+	// Message is a human-readable description.
+	Message string
+
+	// Severity is [SeverityError] for "syntax", [SeverityWarning] otherwise.
 	Severity Severity
 }
 
 // Lint reports constructs in data that fall outside the portable
-// `.env` subset. The returned slice may contain warnings even when
-// err is non-nil — warnings encountered before a parse failure are
-// preserved.
+// `.env` subset. Warnings for the whole input are returned even when
+// parsing fails.
 //
-// Warnings ([SeverityWarning] entries) come from a fast surface scan, not
-// from the real parser, so on malformed input they can be approximate or
-// diverge from what [Parse] reports; the returned error is authoritative for
+// Warnings ([SeverityWarning] entries) come from a line-by-line surface scan,
+// not from the parser, so they can be approximate (lines inside a multi-line
+// quoted value are scanned too); the returned error is authoritative for
 // "does this parse". When parsing fails, the failure is reported both as a
-// [SeverityError] entry (carrying the failure [Position]) and as the returned
-// error.
+// [SeverityError] entry and as the returned error.
 func Lint(data []byte, opts ...ParseOption) ([]LintIssue, error) {
 	o := defaultParseOptions()
 	for _, opt := range opts {

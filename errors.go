@@ -5,14 +5,14 @@ import (
 	"fmt"
 )
 
-// ParseError is returned by [Parse] / [Load] / [NewSource] when the
-// `.env` source is malformed. It carries the file path (when available)
-// and the line/column position of the failure.
+// ParseError reports malformed `.env` input. Pos locates the failure;
+// Pos.File is set when the input was read from a path ([Load], [NewSource]).
 type ParseError struct {
 	Pos     Position
 	Message string
 }
 
+// Error formats the error with its position when one is known.
 func (e *ParseError) Error() string {
 	if e == nil {
 		return "dotenv: parse error"
@@ -26,6 +26,8 @@ func (e *ParseError) Error() string {
 	return fmt.Sprintf("dotenv: %s", e.Message)
 }
 
+// Is reports whether target is a [*ParseError], so [errors.Is] with
+// [ErrParse] matches any ParseError.
 func (*ParseError) Is(target error) bool {
 	_, ok := target.(*ParseError)
 	return ok
@@ -45,6 +47,7 @@ type ExpansionError struct {
 	Cause    error
 }
 
+// Error formats the error with the line and variable name when known.
 func (e *ExpansionError) Error() string {
 	if e == nil {
 		return "dotenv: expansion error"
@@ -59,11 +62,14 @@ func (e *ExpansionError) Error() string {
 	}
 }
 
+// Is reports whether target is an [*ExpansionError], so [errors.Is] with
+// [ErrExpansion] matches any ExpansionError.
 func (*ExpansionError) Is(target error) bool {
 	_, ok := target.(*ExpansionError)
 	return ok
 }
 
+// Unwrap returns e.Cause.
 func (e *ExpansionError) Unwrap() error {
 	if e == nil {
 		return nil
@@ -83,7 +89,7 @@ var (
 	// ErrFileTooLarge is returned when an input exceeds [WithMaxFileSize].
 	ErrFileTooLarge = errors.New("dotenv: file size exceeds limit")
 
-	// ErrLineTooLong is returned when a single line exceeds [WithMaxLineLength].
+	// ErrLineTooLong is returned when a single entry exceeds [WithMaxLineLength].
 	ErrLineTooLong = errors.New("dotenv: line length exceeds limit")
 
 	// ErrUnsetVariable is the [ExpansionError.Cause] when expansion under

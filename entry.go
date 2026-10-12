@@ -52,7 +52,7 @@ type Entry struct {
 // entry source bytes are preserved so [File.Marshal] is byte-exact on
 // unmutated inputs.
 //
-// A File returned by [Parse] / [Load] / [NewSource] is safe for
+// A File returned by [Parse] is safe for
 // concurrent reads ([File.Get], [File.Keys], [File.ToMap], [File.Entries],
 // [File.Marshal]), but the mutating methods ([File.Set], [File.Delete])
 // are not — guard a File you intend to mutate from concurrent goroutines.
@@ -79,9 +79,8 @@ func (f *File) Entries() []Entry {
 	return f.entries
 }
 
-// Get returns the value associated with key. When the key appears in
-// multiple assignments the LAST occurrence wins (matching `source
-// <file>` in Bash).
+// Get returns the value associated with key. When the key is assigned
+// more than once, the last assignment wins, as with `source <file>` in Bash.
 func (f *File) Get(key string) (value string, ok bool) {
 	if f == nil {
 		return "", false
@@ -158,11 +157,10 @@ func (f *File) Set(key, value string) {
 
 // IsValidKey reports whether key is a syntactically valid `.env` key — one
 // that round-trips through [Parse] when [WithRelaxedNames] is in effect. A
-// valid key is non-empty, does not begin with a digit, and otherwise
-// contains only identifier bytes: ASCII letters, digits and '_', plus —
-// beyond the portable POSIX subset [A-Za-z_][A-Za-z0-9_]* — '-', '.', and
-// non-ASCII bytes. (Keys outside the POSIX subset only re-parse under
-// [WithRelaxedNames]; the POSIX subset is always safe.)
+// valid key is non-empty, starts with an ASCII letter, '_' or a non-ASCII
+// byte, and continues with ASCII letters, digits, '_', '-', '.' or non-ASCII
+// bytes. Keys outside the portable POSIX subset [A-Za-z_][A-Za-z0-9_]* only
+// re-parse under [WithRelaxedNames].
 //
 // [Marshal] / [Write] reject an invalid key with an error wrapping
 // [ErrInvalidKey]; [File.Set] panics with one.
@@ -198,8 +196,8 @@ func trailingLineEnding(raw []byte) string {
 	}
 }
 
-// Delete removes every assignment for key. Returns true when at least
-// one entry was removed. Comments and blank lines are unaffected.
+// Delete removes every assignment for key and reports whether any was
+// removed. Comments and blank lines are unaffected.
 func (f *File) Delete(key string) bool {
 	if f == nil {
 		return false
@@ -236,8 +234,8 @@ func (f *File) Keys() []string {
 	return out
 }
 
-// ToMap returns the file's effective key/value mapping (last-write-
-// wins per Bash convention).
+// ToMap returns the file's effective key/value mapping; when a key is
+// assigned more than once, the last assignment wins.
 func (f *File) ToMap() map[string]string {
 	if f == nil {
 		return nil

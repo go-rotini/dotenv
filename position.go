@@ -17,8 +17,8 @@ type Position struct {
 }
 
 // String renders the position as "file:line:column", omitting the file when
-// it is empty and the column when it is zero. The zero Position renders as
-// "<unknown position>".
+// it is empty and the column when it is zero. A Position without a line
+// (such as the zero value) renders as "<unknown position>".
 func (p Position) String() string {
 	if p.Line <= 0 {
 		return "<unknown position>"
