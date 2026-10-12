@@ -158,7 +158,7 @@ for _, iss := range issues {
 | `WithStrictDotenv()` | Reject non-portable constructs (`KEY: value`, `export ` prefix, non-POSIX identifiers). |
 | `WithRelaxedNames()` | Accept identifiers with hyphens, dots, or non-ASCII characters. |
 | `WithMaxFileSize(int64)` | Cap total input size (default 10 MiB; ≤0 = unlimited). |
-| `WithMaxLineLength(int)` | Cap a single physical line (default 1 MiB; ≤0 = unlimited). |
+| `WithMaxLineLength(int)` | Cap a single entry, line ending excluded (default 1 MiB; ≤0 = unlimited). |
 
 ## Errors
 

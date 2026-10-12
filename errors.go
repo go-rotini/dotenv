@@ -47,12 +47,16 @@ type ExpansionError struct {
 	Cause    error
 }
 
-// Error formats the error with the line and variable name when known.
+// Error formats the error with its position and variable name when known;
+// like [ParseError.Error], the position is file:line:column when Pos.File
+// is set.
 func (e *ExpansionError) Error() string {
 	if e == nil {
 		return "dotenv: expansion error"
 	}
 	switch {
+	case e.Pos.Line > 0 && e.Pos.File != "":
+		return fmt.Sprintf("dotenv: %s:%d:%d: expansion of %q: %s", e.Pos.File, e.Pos.Line, e.Pos.Column, e.Variable, e.Reason)
 	case e.Pos.Line > 0:
 		return fmt.Sprintf("dotenv: line %d: expansion of %q: %s", e.Pos.Line, e.Variable, e.Reason)
 	case e.Variable != "":

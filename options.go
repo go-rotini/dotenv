@@ -105,10 +105,10 @@ func WithMaxFileSize(n int64) ParseOption {
 	return func(o *parseOptions) { o.maxFileSize = n }
 }
 
-// WithMaxLineLength caps the length in bytes of a single entry, including
-// its line ending. Default 1 MiB. Zero or negative means unlimited. An
-// assignment whose quoted value spans several lines is measured as a whole,
-// not per physical line.
+// WithMaxLineLength caps the length in bytes of a single entry, not
+// counting its line ending. Default 1 MiB. Zero or negative means
+// unlimited. An assignment whose quoted value spans several lines is
+// measured as a whole, inner line endings included, not per physical line.
 func WithMaxLineLength(n int) ParseOption {
 	return func(o *parseOptions) { o.maxLineLength = n }
 }

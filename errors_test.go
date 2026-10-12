@@ -91,3 +91,11 @@ func indexAny(s, sub string) int {
 	}
 	return -1
 }
+
+func TestExpansionErrorIncludesFile(t *testing.T) {
+	e := &ExpansionError{Pos: Position{File: "app.env", Line: 3, Column: 1}, Variable: "X", Reason: "unset"}
+	p := &ParseError{Pos: Position{File: "app.env", Line: 3, Column: 1}, Message: "bad"}
+	if got := e.Error(); !contains(got, "dotenv: app.env:3:1: ") || !contains(got, `"X"`) {
+		t.Errorf("ExpansionError.Error() = %q, want the app.env:3:1 prefix ParseError uses (%q)", got, p.Error())
+	}
+}

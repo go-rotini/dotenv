@@ -402,13 +402,20 @@ func (s *scanner) consumeLineEnding() {
 }
 
 // checkLineLength enforces [WithMaxLineLength] against the logical
-// entry starting at physStart, including its line ending; a multi-line
-// quoted value is measured as a whole.
+// entry starting at physStart, not counting its terminating line ending;
+// a multi-line quoted value is measured as a whole.
 func (s *scanner) checkLineLength(physStart int) error {
 	if s.opts.maxLineLength <= 0 {
 		return nil
 	}
-	if s.pos-physStart > s.opts.maxLineLength {
+	end := s.pos
+	if end > physStart && s.src[end-1] == '\n' {
+		end--
+	}
+	if end > physStart && s.src[end-1] == '\r' {
+		end--
+	}
+	if end-physStart > s.opts.maxLineLength {
 		return fmt.Errorf("line at offset %d exceeds %d bytes: %w",
 			physStart, s.opts.maxLineLength, ErrLineTooLong)
 	}

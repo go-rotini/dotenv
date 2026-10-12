@@ -548,3 +548,18 @@ func TestScanner_HasExportPrefix_EdgeCases(t *testing.T) {
 		t.Error("short prefix should not match")
 	}
 }
+
+func TestScanner_MaxLineLengthExcludesLineEnding(t *testing.T) {
+	for _, src := range []string{"K=abc", "K=abc\n", "K=abc\r\n", "K=abc\r", "# 123\n"} {
+		if _, err := Parse([]byte(src), WithMaxLineLength(5)); err != nil {
+			t.Errorf("Parse(%q) with limit 5 = %v, want nil", src, err)
+		}
+	}
+	if _, err := Parse([]byte("K=abcd\n"), WithMaxLineLength(5)); !errors.Is(err, ErrLineTooLong) {
+		t.Errorf("6-byte entry with limit 5 = %v, want ErrLineTooLong", err)
+	}
+	// A multi-line quoted value counts its inner line endings, not the last.
+	if _, err := Parse([]byte("K='a\nb'\n"), WithMaxLineLength(7)); err != nil {
+		t.Errorf("7-byte multi-line entry with limit 7 = %v, want nil", err)
+	}
+}
