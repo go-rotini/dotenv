@@ -99,3 +99,19 @@ func TestExpansionErrorIncludesFile(t *testing.T) {
 		t.Errorf("ExpansionError.Error() = %q, want the app.env:3:1 prefix ParseError uses (%q)", got, p.Error())
 	}
 }
+
+func TestExpansionErrorWithoutVariable(t *testing.T) {
+	for _, c := range []struct {
+		e    *ExpansionError
+		want string
+	}{
+		{&ExpansionError{Pos: Position{File: "x.env", Line: 2, Column: 4}, Reason: "bad substitution"}, "dotenv: x.env:2:4: expansion: bad substitution"},
+		{&ExpansionError{Pos: Position{Line: 2, Column: 4}, Reason: "bad substitution"}, "dotenv: line 2, column 4: expansion: bad substitution"},
+		{&ExpansionError{Reason: "bad substitution"}, "dotenv: expansion: bad substitution"},
+		{&ExpansionError{Pos: Position{Line: 2, Column: 4}, Variable: "A", Reason: "unset"}, `dotenv: line 2, column 4: expansion of "A": unset`},
+	} {
+		if got := c.e.Error(); got != c.want {
+			t.Errorf("Error() = %q, want %q", got, c.want)
+		}
+	}
+}

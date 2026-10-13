@@ -4,8 +4,10 @@ package dotenv
 // [NewReaderSource], and [Lint].
 //
 // By default inputs are limited to 10 MiB ([WithMaxFileSize]) and entries
-// to 1 MiB ([WithMaxLineLength]); exceeding either returns an error wrapping
-// [ErrFileTooLarge] or [ErrLineTooLong].
+// to 1 MiB ([WithMaxLineLength]); exceeding either returns a [*ParseError]
+// wrapping [ErrFileTooLarge] or [ErrLineTooLong]. Readers and files are
+// read only up to the limit. Expansion may substitute at most as many
+// bytes as the file-size limit ([WithMaxExpandedSize]).
 type ParseOption func(*parseOptions)
 
 type parseOptions struct {
@@ -16,23 +18,40 @@ type parseOptions struct {
 	backticks         bool
 	strictDotenv      bool
 	maxFileSize       int64
+	maxExpandedSize   int64
+	expandedSizeSet   bool
 	maxLineLength     int
 	relaxedNames      bool
 	filePath          string
 }
 
+// defaultMaxSize is the default input size and expansion budget (10 MiB).
+const defaultMaxSize = 10 * 1024 * 1024
+
 func defaultParseOptions() parseOptions {
 	return parseOptions{
 		maxExpansionDepth: 16,
-		maxFileSize:       10 * 1024 * 1024, // 10 MiB
-		maxLineLength:     1024 * 1024,      // 1 MiB
+		maxFileSize:       defaultMaxSize,
+		maxLineLength:     1024 * 1024, // 1 MiB
 	}
 }
 
 // WithExpand enables Bash-style variable expansion in unquoted and
-// double-quoted values: `$VAR`, `${VAR}`, `${VAR:-default}`,
-// `${VAR-default}`, `${VAR:?error}`. Backslash-dollar (`\$`) suppresses
-// expansion. Lookups walk the file's already-parsed entries first, then
+// double-quoted values: `$VAR`, `${VAR}`, `${VAR:-word}`, `${VAR-word}`
+// (default), `${VAR:?word}`, `${VAR?word}` (error), and `${VAR:+word}`,
+// `${VAR+word}` (alternative). Any other `${...}` body fails with
+// [ErrBadSubstitution]. Backslash-dollar (`\$`) suppresses expansion.
+//
+// In unquoted values a backslash is literal, except that `\$` is a
+// literal `$` and, inside `${...}`, a backslash hides the next byte from
+// brace matching, so `${A:-C:\Temp\}` is left unexpanded. In
+// double-quoted values the escapes are decoded first, and a backslash
+// written as `\\` is plain text: `"${A:-C:\\Temp\\}"` gives `C:\Temp\`.
+// Every `{` inside `${...}` opens a level that needs its own `}`, so
+// `${A:-{}` is left unexpanded.
+//
+// Single-quoted and backtick-quoted values are not expanded but can be
+// referenced. Lookups walk the file's already-parsed entries first, then
 // any parent set via [WithExpansionParent].
 func WithExpand() ParseOption {
 	return func(o *parseOptions) { o.expand = true }
@@ -63,6 +82,9 @@ func WithMaxExpansionDepth(n int) ParseOption {
 // WithExpansionParent sets the [VarLookup] consulted by variable expansion
 // when a referenced variable is not present in the file's own entries. It
 // has no effect unless [WithExpand] (or [WithExpandFromOSEnv]) is also set.
+// The file's entries take precedence, as when the file is sourced by a
+// shell: with `A=file` in the file and A=os in the parent, `$A` expands to
+// "file" even where a loader gives the parent precedence for A itself.
 //
 // Any github.com/go-rotini/env Source satisfies [VarLookup], so passing
 // env.OSEnv() or env.Map(...) works directly. For the common
@@ -76,7 +98,8 @@ func WithExpansionParent(parent VarLookup) ParseOption {
 // resolves references not defined in the file against the process
 // environment via [os.LookupEnv]. It is equivalent to
 // `WithExpand()` plus `WithExpansionParent(<an os.LookupEnv-backed VarLookup>)`,
-// using only the standard library.
+// using only the standard library. As with [WithExpansionParent], the
+// file's own entries take precedence over the environment.
 func WithExpandFromOSEnv() ParseOption {
 	return func(o *parseOptions) {
 		o.expand = true
@@ -99,10 +122,35 @@ func WithStrictDotenv() ParseOption {
 	return func(o *parseOptions) { o.strictDotenv = true }
 }
 
-// WithMaxFileSize caps the total input size. Default 10 MiB. Zero or
-// negative means unlimited.
+// WithMaxFileSize caps the total input size. Default 10 MiB. Zero,
+// negative, or [math.MaxInt64] means unlimited. A reader or file is read
+// only up to the cap.
 func WithMaxFileSize(n int64) ParseOption {
 	return func(o *parseOptions) { o.maxFileSize = n }
+}
+
+// WithMaxExpandedSize caps the total bytes variable expansion may
+// substitute across a file, so a short file of nested references cannot
+// expand to gigabytes. Exceeding it yields an [*ExpansionError] whose
+// cause is [ErrExpansionTooLarge]. Default: the [WithMaxFileSize] limit,
+// or 10 MiB when that is unlimited. Zero or negative means unlimited.
+func WithMaxExpandedSize(n int64) ParseOption {
+	return func(o *parseOptions) {
+		o.maxExpandedSize = n
+		o.expandedSizeSet = true
+	}
+}
+
+// expandedSizeLimit is the effective [WithMaxExpandedSize] cap; zero
+// means unlimited.
+func (o parseOptions) expandedSizeLimit() int64 {
+	switch {
+	case o.expandedSizeSet:
+		return max(o.maxExpandedSize, 0)
+	case o.maxFileSize > 0:
+		return o.maxFileSize
+	}
+	return defaultMaxSize
 }
 
 // WithMaxLineLength caps the length in bytes of a single entry, not

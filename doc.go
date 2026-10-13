@@ -3,7 +3,8 @@
 //
 // The default dialect accepts the common forms found in the wild: `KEY=value`,
 // the `export ` prefix, YAML-style `KEY: value`, single- and double-quoted
-// values (both may span lines), and trailing `# comments`. Other extensions
+// values (both may span lines; a line break inside quotes reads as LF
+// whatever the file uses), and trailing `# comments`. Other extensions
 // are opt-in [ParseOption] values: variable expansion ([WithExpand]),
 // backtick quoting ([WithBackticks]) and non-POSIX key names
 // ([WithRelaxedNames]). [WithStrictDotenv] rejects the `export ` prefix and

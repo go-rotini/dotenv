@@ -22,13 +22,17 @@ likewise `WithExpansionParent` takes a one-method `VarLookup` interface that any
 
 ## Features
 
-- Conservative portable `.env` subset by default; every dialect-specific extension
-  (`export ` prefix, YAML-style `KEY: value`, backtick quoting, variable expansion,
-  multi-line double-quoted strings, relaxed identifiers) is opt-in via `ParseOption`s.
+- Accepts the common forms by default: `KEY=value`, the `export ` prefix, YAML-style
+  `KEY: value`, single- and double-quoted values (both may span lines; a line break inside
+  quotes reads as LF, even in a CRLF file), and trailing
+  `# comments`. Backtick quoting, variable expansion and relaxed identifiers are
+  opt-in via `ParseOption`s; `WithStrictDotenv()` rejects `export ` and `KEY: value`.
 - Bash-style variable expansion (opt-in): `$VAR`, `${VAR}`, `${VAR:-default}`,
-  `${VAR-default}`, `${VAR:?error}`, `\$` to suppress; resolve references not defined
-  in the file from the process environment with `WithExpandFromOSEnv()`, or from any
-  `VarLookup` (e.g. `env.OSEnv()`, `env.Map(...)`) via `WithExpansionParent`.
+  `${VAR-default}`, `${VAR:?error}`, `${VAR?error}`, `${VAR:+alt}`, `${VAR+alt}`,
+  `\$` to suppress; resolve references not defined in the file from the process
+  environment with `WithExpandFromOSEnv()`, or from any `VarLookup` (e.g.
+  `env.OSEnv()`, `env.Map(...)`) via `WithExpansionParent`. The file's own entries
+  take precedence over those fallbacks, including single-quoted ones.
 - Lossless `File` AST: entry order and per-entry source bytes are preserved, so
   `(*File).Marshal` is byte-exact on unmutated input; `Set`/`Delete` re-render only
   the affected line. (`Set` panics on a syntactically invalid key — see `IsValidKey`.
@@ -39,9 +43,10 @@ likewise `WithExpansionParent` takes a one-method `VarLookup` interface that any
   non-POSIX identifiers, backtick values) as warnings, and parse failures as errors.
 - `Source` adapters: `NewSource` (path), `NewReaderSource` (`io.Reader`), `MapSource` (map),
   and `(*File).Source` — all return a `*Source` that any env loader accepts as a `Source`.
-- DoS guards: max file size (default 10 MiB), max line length (default 1 MiB), and a
-  bounded expansion-recursion depth (default 16) that catches deeply nested /
-  self-referential `${VAR:-default}` chains.
+- DoS guards: max file size (default 10 MiB; files and readers are read only up to
+  it), max line length (default 1 MiB), a cap on the bytes expansion may substitute
+  (default: the file-size limit), and a bounded expansion-recursion depth (default 16)
+  that catches deeply nested / self-referential `${VAR:-default}` chains.
 - Zero dependencies — `go.mod` has no `require` line at all (only the dev `tool` block).
 
 ## Installation
@@ -141,8 +146,8 @@ issues, err := dotenv.Lint(data)
 for _, iss := range issues {
 	fmt.Printf("%s: [%s] %s: %s\n", iss.Pos, iss.Severity, iss.Rule, iss.Message)
 }
-// err != nil when the input failed to parse; warnings collected before the
-// failure are still returned.
+// err != nil when the input failed to parse; warnings for the entries before
+// the failure are still returned.
 ```
 
 ## Parse options
@@ -155,9 +160,10 @@ for _, iss := range issues {
 | `WithStrictExpansion()` | Unset variable references raise `*ExpansionError` (cause `ErrUnsetVariable`) instead of expanding to empty. |
 | `WithMaxExpansionDepth(int)` | Bound expansion recursion (default 16). |
 | `WithBackticks()` | Accept backtick-quoted values (motdotla/dotenv dialect); treated like single quotes. |
-| `WithStrictDotenv()` | Reject non-portable constructs (`KEY: value`, `export ` prefix, non-POSIX identifiers). |
-| `WithRelaxedNames()` | Accept identifiers with hyphens, dots, or non-ASCII characters. |
-| `WithMaxFileSize(int64)` | Cap total input size (default 10 MiB; ≤0 = unlimited). |
+| `WithStrictDotenv()` | Reject the `export ` prefix and `KEY: value` separators (does not override `WithRelaxedNames()` or `WithBackticks()`). |
+| `WithRelaxedNames()` | Accept identifiers with hyphens, dots, or non-ASCII characters. Under expansion `${MY-KEY}` reads as "MY, default `KEY`", so a hyphenated key cannot be referenced. |
+| `WithMaxFileSize(int64)` | Cap total input size; files and readers are read only up to it (default 10 MiB; ≤0 or `math.MaxInt64` = unlimited). |
+| `WithMaxExpandedSize(int64)` | Cap the total bytes expansion substitutes (default: the file-size limit, or 10 MiB if that is unlimited; ≤0 = unlimited). |
 | `WithMaxLineLength(int)` | Cap a single entry, line ending excluded (default 1 MiB; ≤0 = unlimited). |
 
 ## Errors
@@ -166,9 +172,12 @@ for _, iss := range issues {
   file path and line/column (`ParseError.Pos`, a `dotenv.Position`).
 - `*ExpansionError` (`errors.Is(err, dotenv.ErrExpansion)`) — variable-expansion failure.
   Its `Cause` is `dotenv.ErrUnsetVariable` for an unset reference under strict expansion,
-  `dotenv.ErrAssertionFailed` for a failed `${VAR:?msg}` assertion, or
-  `dotenv.ErrMaxExpansionDepth` when the `WithMaxExpansionDepth` bound was exceeded.
-- `dotenv.ErrFileTooLarge`, `dotenv.ErrLineTooLong` — resource-limit violations.
+  `dotenv.ErrAssertionFailed` for a failed `${VAR:?msg}` assertion,
+  `dotenv.ErrMaxExpansionDepth` when the `WithMaxExpansionDepth` bound was exceeded,
+  `dotenv.ErrBadSubstitution` for a `${...}` body that is not a reference, or
+  `dotenv.ErrExpansionTooLarge` when the `WithMaxExpandedSize` cap was exceeded.
+- `dotenv.ErrFileTooLarge`, `dotenv.ErrLineTooLong` — resource-limit violations, the
+  `Cause` of a `*ParseError` that carries the position.
 - `dotenv.ErrInvalidKey` — wrapped by the error `Marshal`/`Write` return (and by the value
   `(*File).Set` panics with) when a key isn't a valid `.env` identifier.
 

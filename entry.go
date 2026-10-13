@@ -43,6 +43,17 @@ type Entry struct {
 	// — internal to the parse → expand pipeline.
 	quote byte
 
+	// literal holds the sorted offsets in Value of the bytes decoded
+	// from a `\$` or `\\` escape in a double-quoted value: such a `$`
+	// starts no reference and such a `\` escapes nothing under
+	// expansion.
+	literal []int
+
+	// exported and sep record the `export` prefix and the key/value
+	// separator ('=' or ':') for [Lint].
+	exported bool
+	sep      byte
+
 	// raw is the verbatim source text including the line ending.
 	// Marshal emits this slice unchanged for unmutated entries.
 	raw []byte
@@ -70,17 +81,18 @@ func (f *File) Path() string {
 	return f.path
 }
 
-// Entries returns the entry list. The slice is not for caller
-// mutation; use [File.Set] / [File.Delete].
+// Entries returns a copy of the entry list. Changing it does not change
+// the File; use [File.Set] / [File.Delete].
 func (f *File) Entries() []Entry {
 	if f == nil {
 		return nil
 	}
-	return f.entries
+	return slices.Clone(f.entries)
 }
 
 // Get returns the value associated with key. When the key is assigned
 // more than once, the last assignment wins, as with `source <file>` in Bash.
+// Get scans the entries, so to read many keys use [File.ToMap] once.
 func (f *File) Get(key string) (value string, ok bool) {
 	if f == nil {
 		return "", false

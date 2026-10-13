@@ -79,26 +79,47 @@ func (s *scanner) currentPos() Position {
 
 // scanFile drains src into a *File. Returns the first parse error.
 func scanFile(src []byte, opts parseOptions) (*File, error) {
-	if opts.maxFileSize > 0 && int64(len(src)) > opts.maxFileSize {
-		return nil, fmt.Errorf("size %d > %d: %w", len(src), opts.maxFileSize, ErrFileTooLarge)
+	entries, err := scanEntries(src, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &File{path: opts.filePath, entries: entries}, nil
+}
+
+// scanEntries scans src (with any BOM stripped) into entries. On a
+// parse error it also returns the entries before the failing one.
+func scanEntries(src []byte, opts parseOptions) ([]Entry, error) {
+	if err := checkFileSize(int64(len(src)), opts); err != nil {
+		return nil, err
 	}
 	src = stripUTF8BOM(src)
 
 	s := newScanner(src, opts)
-	f := &File{path: opts.filePath}
-
+	var entries []Entry
 	for !s.done() {
 		startPos := s.currentPos()
 		startOff := s.pos
 		entry, err := s.scanLogicalEntry()
 		if err != nil {
-			return nil, err
+			return entries, err
 		}
 		entry.Pos = startPos
 		entry.raw = bytes.Clone(src[startOff:s.pos])
-		f.entries = append(f.entries, entry)
+		entries = append(entries, entry)
 	}
-	return f, nil
+	return entries, nil
+}
+
+// checkFileSize enforces [WithMaxFileSize] for an input of n bytes.
+func checkFileSize(n int64, opts parseOptions) error {
+	if opts.maxFileSize > 0 && n > opts.maxFileSize {
+		return &ParseError{
+			Pos:     Position{File: opts.filePath},
+			Message: fmt.Sprintf("input exceeds %d bytes", opts.maxFileSize),
+			Cause:   ErrFileTooLarge,
+		}
+	}
+	return nil
 }
 
 // stripUTF8BOM removes a leading UTF-8 BOM (EF BB BF) if present.
@@ -143,11 +164,12 @@ func (s *scanner) scanLogicalEntry() (Entry, error) {
 func (s *scanner) scanAssignment(physStart int) (Entry, error) {
 	startPos := s.currentPos()
 
-	if hasExportPrefix(s.src[s.pos:]) {
+	exported := hasExportPrefix(s.src[s.pos:], s.opts.relaxedNames)
+	if exported {
 		if s.opts.strictDotenv {
 			return Entry{}, &ParseError{Pos: startPos, Message: "export prefix not allowed in strict mode"}
 		}
-		s.advance(len(exportPrefix))
+		s.advance(len(exportKeyword))
 		for !s.done() && (s.peek() == ' ' || s.peek() == '\t') {
 			s.advance(1)
 		}
@@ -167,10 +189,14 @@ func (s *scanner) scanAssignment(physStart int) (Entry, error) {
 		s.advance(1)
 	}
 
+	if exported && (s.done() || isLineEnding(s.peek()) || s.peek() == '#') {
+		return Entry{}, &ParseError{Pos: startPos, Message: fmt.Sprintf("`export %s` without an assignment is not supported", key)}
+	}
 	if s.done() {
 		return Entry{}, &ParseError{Pos: s.currentPos(), Message: "expected '=' or ':' after key"}
 	}
-	switch s.peek() {
+	sep := s.peek()
+	switch sep {
 	case '=':
 		s.advance(1)
 	case ':':
@@ -186,7 +212,7 @@ func (s *scanner) scanAssignment(physStart int) (Entry, error) {
 		s.advance(1)
 	}
 
-	value, quote, err := s.scanValue()
+	value, literal, quote, err := s.scanValue()
 	if err != nil {
 		return Entry{}, err
 	}
@@ -200,37 +226,41 @@ func (s *scanner) scanAssignment(physStart int) (Entry, error) {
 	}
 
 	return Entry{
-		Kind:  EntryAssignment,
-		Key:   key,
-		Value: value,
-		quote: quote,
+		Kind:     EntryAssignment,
+		Key:      key,
+		Value:    value,
+		quote:    quote,
+		literal:  literal,
+		exported: exported,
+		sep:      sep,
 	}, nil
 }
 
 // scanValue reads an assignment's value, dispatching by quote kind.
 // On return the scanner is positioned after the value (or its closing
 // quote) but before any trailing whitespace / comment / line ending.
-// Returns the decoded value, the quote form (0, '"', '\”, '`'), and
-// any parse error.
-func (s *scanner) scanValue() (string, byte, error) {
+// Returns the decoded value, the offsets of escaped `$` and `\` bytes
+// in a double-quoted value (see [scanner.scanDoubleQuoted]), the quote form (0, '"', '\”,
+// '`'), and any parse error.
+func (s *scanner) scanValue() (string, []int, byte, error) {
 	if s.done() || isLineEnding(s.peek()) {
-		return "", 0, nil
+		return "", nil, 0, nil
 	}
 	switch s.peek() {
 	case '"':
-		v, err := s.scanDoubleQuoted()
-		return v, '"', err
+		v, literal, err := s.scanDoubleQuoted()
+		return v, literal, '"', err
 	case '\'':
 		v, err := s.scanSingleQuoted()
-		return v, '\'', err
+		return v, nil, '\'', err
 	case '`':
 		if s.opts.backticks {
 			v, err := s.scanBacktickQuoted()
-			return v, '`', err
+			return v, nil, '`', err
 		}
-		return "", 0, &ParseError{Pos: s.currentPos(), Message: "backtick-quoted value not allowed; use WithBackticks() to enable"}
+		return "", nil, 0, &ParseError{Pos: s.currentPos(), Message: "backtick-quoted value not allowed; use WithBackticks() to enable"}
 	default:
-		return s.scanUnquoted(), 0, nil
+		return s.scanUnquoted(), nil, 0, nil
 	}
 }
 
@@ -269,7 +299,7 @@ func (s *scanner) scanSingleQuoted() (string, error) {
 	if s.done() {
 		return "", &ParseError{Pos: openPos, Message: "unterminated single-quoted value"}
 	}
-	value := string(s.src[start:s.pos])
+	value := normalizeLineBreaks(string(s.src[start:s.pos]))
 	s.advance(1)
 	return value, nil
 }
@@ -286,23 +316,27 @@ func (s *scanner) scanBacktickQuoted() (string, error) {
 	if s.done() {
 		return "", &ParseError{Pos: openPos, Message: "unterminated backtick-quoted value"}
 	}
-	value := string(s.src[start:s.pos])
+	value := normalizeLineBreaks(string(s.src[start:s.pos]))
 	s.advance(1)
 	return value, nil
 }
 
 // scanDoubleQuoted reads a double-quoted value with the standard
 // escape table. Literal newlines are permitted inside the quotes.
-// `\<LF>` / `\<CRLF>` is line continuation; `\$` is preserved via
-// [dollarSuppressSentinel] when expansion is enabled. Unknown escapes
-// pass through as `\X` (matching motdotla's tolerant behavior).
-func (s *scanner) scanDoubleQuoted() (string, error) {
+// `\<LF>` / `\<CRLF>` is line continuation. Under [WithExpand], the
+// offsets of the bytes decoded from `\$` and `\\` are returned in
+// literal, so expansion treats them as plain text. Unknown escapes pass
+// through as `\X` (matching motdotla's tolerant behavior).
+func (s *scanner) scanDoubleQuoted() (value string, literal []int, err error) {
 	openPos := s.currentPos()
 	s.advance(1)
 	var buf strings.Builder
 	for !s.done() && s.peek() != '"' {
 		c := s.peek()
 		if c == '\\' {
+			if s.pos+1 >= len(s.src) {
+				return "", nil, &ParseError{Pos: s.currentPos(), Message: "unterminated escape sequence"}
+			}
 			next := s.peekAt(1)
 			switch next {
 			case 'n':
@@ -323,14 +357,11 @@ func (s *scanner) scanDoubleQuoted() (string, error) {
 			case '"':
 				buf.WriteByte('"')
 				s.advance(2)
-			case '\\':
-				buf.WriteByte('\\')
-				s.advance(2)
-			case '$':
+			case '\\', '$':
 				if s.opts.expand {
-					buf.WriteByte(dollarSuppressSentinel)
+					literal = append(literal, buf.Len())
 				}
-				buf.WriteByte('$')
+				buf.WriteByte(next)
 				s.advance(2)
 			case '\n':
 				s.advance(2)
@@ -339,8 +370,6 @@ func (s *scanner) scanDoubleQuoted() (string, error) {
 				if !s.done() && s.peek() == '\n' {
 					s.advance(1)
 				}
-			case 0:
-				return "", &ParseError{Pos: s.currentPos(), Message: "unterminated escape sequence"}
 			default:
 				buf.WriteByte('\\')
 				buf.WriteByte(next)
@@ -348,14 +377,31 @@ func (s *scanner) scanDoubleQuoted() (string, error) {
 			}
 			continue
 		}
+		if c == '\r' {
+			buf.WriteByte('\n')
+			s.advance(1)
+			if !s.done() && s.peek() == '\n' {
+				s.advance(1)
+			}
+			continue
+		}
 		buf.WriteByte(c)
 		s.advance(1)
 	}
 	if s.done() {
-		return "", &ParseError{Pos: openPos, Message: "unterminated double-quoted value"}
+		return "", nil, &ParseError{Pos: openPos, Message: "unterminated double-quoted value"}
 	}
 	s.advance(1)
-	return buf.String(), nil
+	return buf.String(), literal, nil
+}
+
+// normalizeLineBreaks turns each CRLF or bare CR in a quoted value's
+// literal text into LF.
+func normalizeLineBreaks(v string) string {
+	if !strings.Contains(v, "\r") {
+		return v
+	}
+	return strings.ReplaceAll(strings.ReplaceAll(v, "\r\n", "\n"), "\r", "\n")
 }
 
 // consumeTrailingAndLineEnding skips whitespace + optional `# comment`
@@ -416,21 +462,48 @@ func (s *scanner) checkLineLength(physStart int) error {
 		end--
 	}
 	if end-physStart > s.opts.maxLineLength {
-		return fmt.Errorf("line at offset %d exceeds %d bytes: %w",
-			physStart, s.opts.maxLineLength, ErrLineTooLong)
+		return &ParseError{
+			Pos:     s.posAt(physStart),
+			Message: fmt.Sprintf("entry exceeds %d bytes", s.opts.maxLineLength),
+			Cause:   ErrLineTooLong,
+		}
 	}
 	return nil
 }
 
-var exportPrefix = []byte("export ")
+// posAt returns the position of offset off, which must not be after
+// the scanner's position.
+func (s *scanner) posAt(off int) Position {
+	line, col := 1, 1
+	for i := range off {
+		switch s.src[i] {
+		case '\n':
+			line, col = line+1, 1
+		case '\r':
+			if i+1 < len(s.src) && s.src[i+1] == '\n' {
+				continue
+			}
+			line, col = line+1, 1
+		default:
+			col++
+		}
+	}
+	return Position{File: s.opts.filePath, Line: line, Column: col, Offset: off}
+}
 
-// hasExportPrefix reports whether b begins with "export " followed by
-// an identifier-start byte.
-func hasExportPrefix(b []byte) bool {
-	if len(b) <= len(exportPrefix) || !bytes.HasPrefix(b, exportPrefix) {
+var exportKeyword = []byte("export")
+
+// hasExportPrefix reports whether b begins with "export", one or more
+// spaces or tabs, and an identifier-start byte.
+func hasExportPrefix(b []byte, relaxed bool) bool {
+	if !bytes.HasPrefix(b, exportKeyword) {
 		return false
 	}
-	return isIdentifierStart(b[len(exportPrefix)], false)
+	i := len(exportKeyword)
+	for i < len(b) && (b[i] == ' ' || b[i] == '\t') {
+		i++
+	}
+	return i > len(exportKeyword) && i < len(b) && isIdentifierStart(b[i], relaxed)
 }
 
 // isLineEnding reports whether c is LF or CR.

@@ -2,6 +2,7 @@ package dotenv_test
 
 import (
 	"bytes"
+	"maps"
 	"testing"
 
 	"github.com/go-rotini/dotenv"
@@ -88,6 +89,67 @@ func FuzzExpand(f *testing.F) {
 		_, _ = dotenv.Parse(data, dotenv.WithExpand())
 		_, _ = dotenv.Parse(data, dotenv.WithExpand(), dotenv.WithStrictExpansion())
 		_, _ = dotenv.Parse(data, dotenv.WithExpand(), dotenv.WithMaxExpansionDepth(4))
+
+		// Literal text comes from the input, so the expanded values can
+		// exceed the input by at most the substitution budget.
+		const budget = 1 << 12
+		file, err := dotenv.Parse(data, dotenv.WithExpand(), dotenv.WithMaxExpandedSize(budget))
+		if err != nil {
+			return
+		}
+		total := 0
+		for _, e := range file.Entries() {
+			total += len(e.Value)
+		}
+		if total > len(data)+budget {
+			t.Fatalf("expanded to %d bytes from %d input bytes", total, len(data))
+		}
+	})
+}
+
+// FuzzMapRoundTrip checks that a parsed map survives Marshal and a
+// reparse, with expansion off and on (Marshal escapes `$`).
+func FuzzMapRoundTrip(f *testing.F) {
+	for _, s := range []string{"A=1\n", "A='x y'\nB=\"a\\nb\"\n", "a.b-c=1\n", "A=`x`\n", "K: v\n", "A=\"\a$B\"\n"} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		first, err := dotenv.Parse(data, dotenv.WithRelaxedNames(), dotenv.WithBackticks())
+		if err != nil {
+			return
+		}
+		m := first.ToMap()
+		out, err := dotenv.Marshal(m)
+		if err != nil {
+			t.Fatalf("Marshal of parsed map: %v", err)
+		}
+		for _, opts := range [][]dotenv.ParseOption{
+			{dotenv.WithRelaxedNames()},
+			{dotenv.WithRelaxedNames(), dotenv.WithExpand()},
+		} {
+			second, err := dotenv.Parse(out, opts...)
+			if err != nil {
+				t.Fatalf("reparse: %v\n%q", err, out)
+			}
+			if got := second.ToMap(); !maps.Equal(got, m) {
+				t.Fatalf("round trip %q -> %q -> %q", m, out, got)
+			}
+		}
+	})
+}
+
+// FuzzLintAgrees checks that Lint and Parse agree on whether input
+// parses.
+func FuzzLintAgrees(f *testing.F) {
+	for _, s := range scannerSeeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, perr := dotenv.Parse(data)
+		_, lerr := dotenv.Lint(data)
+		if (perr == nil) != (lerr == nil) {
+			t.Fatalf("Parse err %v, Lint err %v", perr, lerr)
+		}
 	})
 }
 
