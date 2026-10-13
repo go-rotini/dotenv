@@ -1,6 +1,6 @@
-# The parser's fuzz targets for ten minutes each, every night. Pushes run every fuzz target for
-# 60 seconds (make test-fuzz); this longer run reaches inputs a short one doesn't. A failing
-# input is kept as an artifact: put it under testdata/fuzz/<target>/ to reproduce it with go test.
+# Every fuzz target for ten minutes each, every night. Pushes run every fuzz target for 60 seconds
+# (make test-fuzz); this longer run reaches inputs a short one doesn't. A failing input is kept as
+# an artifact: put it under testdata/fuzz/<target>/ to reproduce it with go test.
 name: Nightly fuzz
 
 on:
@@ -12,19 +12,35 @@ permissions:
   contents: read
 
 jobs:
+  targets:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+
+      # The matrix is every fuzz target go test finds, so a new or renamed target runs here too.
+      - name: List the fuzz targets
+        id: list
+        run: |
+          targets=$(go test -list '^Fuzz' . | grep '^Fuzz' | jq -R . | jq -cs .)
+          if [ "$targets" = "[]" ]; then
+            echo "::error::no fuzz targets found"
+            exit 1
+          fi
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
   fuzz:
+    needs: targets
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - FuzzExpand
-          - FuzzLintAgrees
-          - FuzzMapRoundTrip
-          - FuzzMarshalEdit
-          - FuzzMatchBraces
-          - FuzzParser
-          - FuzzRoundTrip
-          - FuzzScanner
+        target: ${{ fromJSON(needs.targets.outputs.targets) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -37,28 +53,20 @@ jobs:
           go-version: "1.26.x"
           check-latest: true
 
-      # go test -fuzz exits 0 when no target matches, so a renamed target would drop out silently.
-      - name: Check the target exists
-        run: |
-          if ! go test -list "^${TARGET}\$" . | grep -qx "$TARGET"; then
-            echo "::error::$TARGET is not a fuzz target in this package; update the matrix"
-            exit 1
-          fi
-
-      # go test -fuzz can lose a race with its own -fuzztime and fail with a bare "context
-      # deadline exceeded"; with no failing input written, that run passed (as in make test-fuzz).
+      # go test can race with its own deadline and fail with a bare "context deadline exceeded"
+      # and no failing input; as in make test-fuzz, that outcome counts as a pass.
       - name: Fuzz for 10 minutes
         run: |
-          log=$(mktemp)
-          status=0
-          go test -run='^$' -fuzz="^${TARGET}\$" -fuzztime=10m . >"$log" 2>&1 || status=$?
-          cat "$log"
+          set +e
+          go test -run='^$' -fuzz="^${TARGET}\$" -fuzztime=10m . 2>&1 | tee fuzz.log
+          status=${PIPESTATUS[0]}
+          set -e
           if [ "$status" -ne 0 ]; then
-            if grep -q '^    context deadline exceeded$' "$log" && ! grep -q 'Failing input written' "$log"; then
+            if grep -q '^    context deadline exceeded$' fuzz.log && ! grep -q 'Failing input written' fuzz.log; then
               echo "fuzz time elapsed; deadline race in go test, no failing input"
-            else
-              exit "$status"
+              exit 0
             fi
+            exit "$status"
           fi
 
       - name: Keep the failing input

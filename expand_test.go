@@ -3,9 +3,11 @@ package dotenv
 import (
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // kvLookup is a tiny in-memory [VarLookup] for exercising
@@ -460,23 +462,28 @@ func TestExpand_OutputBudget(t *testing.T) {
 }
 
 func TestExpand_UnterminatedBracesLinear(t *testing.T) {
-	src := "A=" + strings.Repeat("${", 20_000) + "\n"
-	f := mustParse(t, src, WithExpand())
+	grow := func(n int) string { return "A=" + strings.Repeat("${", n) + "\n" }
+	f := mustParse(t, grow(20_000), WithExpand())
 	if v, _ := f.Get("A"); len(v) != 40_000 {
 		t.Errorf("len = %d", len(v))
 	}
-	checkLinear(t, src)
+	checkLinear(t, grow, 1_000)
 }
 
-// checkLinear fails when expanding src scans more than three times its
-// length: a linear expansion visits each byte a bounded number of times,
-// while one that rescans the rest of the value per reference visits
-// about len(src)²/2 bytes.
-func checkLinear(t *testing.T, src string) {
+// checkLinear fails when expanding the value grow builds is not linear in
+// its size. It first counts the bytes the expander's own scans visit at
+// size 8m, which must stay within three times the input. That count sees
+// only the scans that report to it, so it then times parsing at sizes m
+// and 8m: linear code takes about 8 times as long at the larger size,
+// while code that rescans the rest of the value per reference takes
+// about 64 times as long. The best of several runs is compared, and a
+// failure is retried, so machine load doesn't decide the result.
+func checkLinear(t *testing.T, grow func(n int) string, m int) {
 	t.Helper()
+	small, large := grow(m), grow(8*m)
 	o := defaultParseOptions()
 	WithExpand()(&o)
-	f, err := scanFile([]byte(src), o)
+	f, err := scanFile([]byte(large), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,9 +491,39 @@ func checkLinear(t *testing.T, src string) {
 	if err := x.expandFile(f); err != nil {
 		t.Fatal(err)
 	}
-	if x.work > 3*len(src) {
-		t.Errorf("expanding %d bytes scanned %d", len(src), x.work)
+	if x.work > 3*len(large) {
+		t.Errorf("expanding %d bytes scanned %d", len(large), x.work)
 	}
+
+	reps := 1
+	for reps < 1<<16 && bestParseTime(t, small, reps) < 2*time.Millisecond {
+		reps *= 2
+	}
+	var ratio float64
+	for range 2 {
+		ratio = float64(bestParseTime(t, large, reps)) / float64(bestParseTime(t, small, reps))
+		if ratio <= 24 {
+			return
+		}
+	}
+	t.Errorf("parsing %d bytes took %.0f times as long as %d bytes; linear is about 8", len(large), ratio, len(small))
+}
+
+// bestParseTime returns the shortest of five timings of reps expanding
+// parses of src.
+func bestParseTime(t *testing.T, src string, reps int) time.Duration {
+	t.Helper()
+	best := time.Duration(math.MaxInt64)
+	for range 5 {
+		start := time.Now()
+		for range reps {
+			if _, err := Parse([]byte(src), WithExpand()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		best = min(best, time.Since(start))
+	}
+	return best
 }
 
 func TestExpand_EscapedBackslashBeforeReference(t *testing.T) {
@@ -545,13 +582,15 @@ func TestExpand_BELIsKept(t *testing.T) {
 }
 
 func TestExpand_EscapesAndDefaultsLinear(t *testing.T) {
+	grow := func(n int) string {
+		return "A=\"" + strings.Repeat(`\$`, n) + strings.Repeat("${X:-}", n) + "\"\n"
+	}
 	n := 12_000 // 96 KB of `\$` escapes and `${X:-}` defaults in one value
-	src := "A=\"" + strings.Repeat(`\$`, n) + strings.Repeat("${X:-}", n) + "\"\n"
-	f := mustParse(t, src, WithExpand())
+	f := mustParse(t, grow(n), WithExpand())
 	if v, _ := f.Get("A"); v != strings.Repeat("$", n) {
 		t.Errorf("len = %d, want %d", len(v), n)
 	}
-	checkLinear(t, src)
+	checkLinear(t, grow, 1_500)
 }
 
 func TestExpand_NestedDefaultsMemory(t *testing.T) {
