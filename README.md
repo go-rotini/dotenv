@@ -40,7 +40,8 @@ likewise `WithExpansionParent` takes a one-method `VarLookup` interface that any
 - Write back out: `Marshal(map[string]string) ([]byte, error)` renders a map as `.env`
   bytes (sorted keys, minimal quoting); `Write(path, map)` does that plus a `0o600` write.
 - `Lint` reports deviations from the portable subset (`export ` prefix, `KEY: value`,
-  non-POSIX identifiers, backtick values) as warnings, and parse failures as errors.
+  non-POSIX identifiers, backtick values) as warnings, and parse failures (and, with
+  `WithExpand`, expansion failures, under the rule `expansion`) as errors.
 - `Source` adapters: `NewSource` (path), `NewReaderSource` (`io.Reader`), `MapSource` (map),
   and `(*File).Source` — all return a `*Source` that any env loader accepts as a `Source`.
 - DoS guards: max file size (default 10 MiB; files and readers are read only up to

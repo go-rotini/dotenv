@@ -3,6 +3,7 @@ package dotenv_test
 import (
 	"bytes"
 	"maps"
+	"strings"
 	"testing"
 
 	"github.com/go-rotini/dotenv"
@@ -259,4 +260,45 @@ func equalMaps(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// FuzzEscapedBackslashIsPlain checks that, in a double-quoted value under
+// expansion, `\\` behaves like any plain byte: the value with `\\` reads
+// as the value with `~` in its place, with each `~` turned back into `\`.
+func FuzzEscapedBackslashIsPlain(f *testing.F) {
+	for _, s := range []string{`${A:-C:\Temp\}`, `\${A}`, `${A:-${B:-\}}`, `${A\}`, `${A:+x\}y}`, `${A:?\}`} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		if strings.ContainsAny(s, "~\r") {
+			return
+		}
+		enc := func(bs string) string {
+			var b strings.Builder
+			for i := 0; i < len(s); i++ {
+				switch s[i] {
+				case '\\':
+					b.WriteString(bs)
+				case '"':
+					b.WriteString(`\"`)
+				default:
+					b.WriteByte(s[i])
+				}
+			}
+			return "A=a\nB=\"" + b.String() + "\"\n"
+		}
+		f1, e1 := dotenv.Parse([]byte(enc(`\\`)), dotenv.WithExpand())
+		f2, e2 := dotenv.Parse([]byte(enc(`~`)), dotenv.WithExpand())
+		if (e1 == nil) != (e2 == nil) {
+			t.Fatalf("%q: err %v vs %v", s, e1, e2)
+		}
+		if e1 != nil {
+			return
+		}
+		v1, _ := f1.Get("B")
+		v2, _ := f2.Get("B")
+		if v1 != strings.ReplaceAll(v2, "~", `\`) {
+			t.Fatalf("%q: %q vs %q", s, v1, v2)
+		}
+	})
 }

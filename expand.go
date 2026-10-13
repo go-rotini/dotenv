@@ -24,6 +24,8 @@ type expander struct {
 	unquoted bool        // enables the `\$` courtesy escape
 	braces   []bracePair // built on the first `${`
 	scanned  bool        // braces is built
+
+	work int // bytes scanned, which stays linear in the input
 }
 
 // expandAll runs variable expansion over every assignment entry in
@@ -32,12 +34,20 @@ type expander struct {
 // later references. Lookups consult the file's already-resolved entries
 // first, then any [WithExpansionParent].
 func (f *File) expandAll(opts parseOptions) error {
-	x := &expander{
+	return newExpander(opts).expandFile(f)
+}
+
+func newExpander(opts parseOptions) *expander {
+	return &expander{
 		opts:     opts,
 		resolved: make(map[string]string),
 		budget:   opts.expandedSizeLimit(),
 		limited:  opts.expandedSizeLimit() > 0,
 	}
+}
+
+// expandFile expands every entry of f in source order.
+func (x *expander) expandFile(f *File) error {
 	for i := range f.entries {
 		e := &f.entries[i]
 		if e.Kind != EntryAssignment {
@@ -61,6 +71,7 @@ func (f *File) expandAll(opts parseOptions) error {
 // expand expands the references in x.s[lo:hi].
 func (x *expander) expand(lo, hi, depth int) (string, error) {
 	s := x.s
+	x.work += hi - lo
 	var b strings.Builder
 	b.Grow(hi - lo)
 	next := sort.SearchInts(x.literal, lo) // index of the first literal offset >= i
@@ -220,6 +231,7 @@ func (x *expander) parseVarRef(i, hi int) (varRef, bool) {
 	if !x.scanned {
 		x.braces = matchBraces(s, x.literal, x.braces[:0])
 		x.scanned = true
+		x.work += len(s)
 	}
 	// The braces of an argument balance within it, so a match found
 	// for the whole value never lies past hi.
@@ -229,6 +241,7 @@ func (x *expander) parseVarRef(i, hi int) (varRef, bool) {
 	}
 	bodyStart := i + 2
 	ref := varRef{name: s[bodyStart:closeIdx], end: closeIdx + 1}
+	x.work += closeIdx - bodyStart
 	if opIdx, opLen := firstTopLevelOperator(s, bodyStart, closeIdx, x.literal); opIdx >= 0 {
 		ref.name = s[bodyStart:opIdx]
 		ref.op = s[opIdx : opIdx+opLen]
@@ -414,6 +427,14 @@ func (e *Entry) valuePos(off int) Position {
 				d++
 				i++
 			}
+		}
+		// A line continuation decodes to nothing, so off lies past any
+		// that follow.
+		for i+1 < len(raw) && raw[i] == '\\' && (raw[i+1] == '\n' || raw[i+1] == '\r') {
+			if raw[i+1] == '\r' && i+2 < len(raw) && raw[i+2] == '\n' {
+				i++
+			}
+			i += 2
 		}
 	}
 	i = min(i, len(raw))

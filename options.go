@@ -169,10 +169,10 @@ func WithMaxLineLength(n int) ParseOption {
 // braces is treated as the default-value operator, not as part of the name —
 // `${MY-KEY}` means "value of MY, or the literal `KEY` if MY is unset", even
 // if a key literally named `MY-KEY` exists. A hyphenated key therefore cannot
-// be interpolated via `${...}`; reference it through a parent ([WithExpansionParent])
-// keyed on the hyphenated name, or avoid hyphens in keys you interpolate. (`$NAME`
-// without braces only ever consumes POSIX identifier bytes, so `$MY-KEY`
-// is `<value of MY>` followed by the literal `-KEY` regardless of this option.)
+// be referenced in an expanded value: rename it, or read it from the parsed
+// [File] after parsing. (`$NAME` without braces only ever consumes POSIX
+// identifier bytes, so `$MY-KEY` is `<value of MY>` followed by the literal
+// `-KEY` regardless of this option.)
 // Dots in names do not collide with any expansion operator.
 func WithRelaxedNames() ParseOption {
 	return func(o *parseOptions) { o.relaxedNames = true }

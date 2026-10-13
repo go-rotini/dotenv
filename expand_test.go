@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 // kvLookup is a tiny in-memory [VarLookup] for exercising
@@ -469,26 +468,24 @@ func TestExpand_UnterminatedBracesLinear(t *testing.T) {
 	checkLinear(t, src)
 }
 
-// checkLinear fails when expanding src takes far longer than parsing a
-// plain value of the same size. Both are timed in the same run (best of
-// three), so a slow or loaded machine, -race or coverage slows both
-// alike; a quadratic expansion is hundreds of times slower at these sizes.
+// checkLinear fails when expanding src scans more than three times its
+// length: a linear expansion visits each byte a bounded number of times,
+// while one that rescans the rest of the value per reference visits
+// about len(src)²/2 bytes.
 func checkLinear(t *testing.T, src string) {
 	t.Helper()
-	best := func(src string) time.Duration {
-		var d time.Duration
-		for i := range 3 {
-			start := time.Now()
-			mustParse(t, src, WithExpand())
-			if e := time.Since(start); i == 0 || e < d {
-				d = e
-			}
-		}
-		return d
+	o := defaultParseOptions()
+	WithExpand()(&o)
+	f, err := scanFile([]byte(src), o)
+	if err != nil {
+		t.Fatal(err)
 	}
-	plain := best("A=" + strings.Repeat("a", len(src)-3) + "\n")
-	if got := best(src); got > 30*plain+10*time.Millisecond {
-		t.Errorf("expanding %d bytes took %v; a plain value of that size takes %v", len(src), got, plain)
+	x := newExpander(o)
+	if err := x.expandFile(f); err != nil {
+		t.Fatal(err)
+	}
+	if x.work > 3*len(src) {
+		t.Errorf("expanding %d bytes scanned %d", len(src), x.work)
 	}
 }
 
@@ -596,6 +593,27 @@ func TestExpand_BadSubstitutionHidesBody(t *testing.T) {
 		}
 		if ee.Pos.Line != c.line || ee.Pos.Column != c.col {
 			t.Errorf("%q: Pos = %d:%d, want %d:%d", c.src, ee.Pos.Line, ee.Pos.Column, c.line, c.col)
+		}
+	}
+}
+
+func TestExpand_ErrorPositionAfterContinuation(t *testing.T) {
+	for _, c := range []struct {
+		src       string
+		line, col int
+	}{
+		{"B=\"a\\\n${U:?}\"\n", 2, 1},
+		{"B=\"a\\\r\n${U:?}\"\n", 2, 1},
+		{"B=\"\\\n\\\n${U:?}\"\n", 3, 1},
+		{"B=\"a\\\nb${U:?}\"\n", 2, 2},
+	} {
+		_, err := Parse([]byte(c.src), WithExpand())
+		var ee *ExpansionError
+		if !errors.As(err, &ee) {
+			t.Fatalf("%q: err = %v", c.src, err)
+		}
+		if ee.Pos.Line != c.line || ee.Pos.Column != c.col || c.src[ee.Pos.Offset] != '$' {
+			t.Errorf("%q: Pos = %+v, want %d:%d at the $", c.src, ee.Pos, c.line, c.col)
 		}
 	}
 }
