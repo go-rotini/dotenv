@@ -2,7 +2,7 @@ package dotenv
 
 import (
 	"errors"
-	"strings"
+	"fmt"
 )
 
 // Severity classifies a [LintIssue].
@@ -13,11 +13,12 @@ const (
 	SeverityError Severity = iota
 
 	// SeverityWarning marks a parseable but non-portable construct
-	// (YAML-style `:`, `export` prefix, backtick quoting, hyphenated
-	// identifiers).
+	// (YAML-style `:`, `export` prefix, backtick quoting, hyphens or
+	// dots in identifiers).
 	SeverityWarning
 )
 
+// String returns "error", "warning", or "unknown".
 func (s Severity) String() string {
 	switch s {
 	case SeverityError:
@@ -28,27 +29,33 @@ func (s Severity) String() string {
 	return "unknown"
 }
 
-// LintIssue describes a deviation from the portable `.env` subset:
-// `export ` prefix, YAML-style `KEY: value`, non-POSIX identifiers
-// (hyphens, dots), or backtick-quoted values.
+// LintIssue is one finding from [Lint].
 type LintIssue struct {
-	Pos      Position
-	Rule     string
-	Message  string
+	// Pos is the start of the offending line, or the failure's position
+	// for a "syntax" or "expansion" issue (zero when unknown).
+	Pos Position
+
+	// Rule names the check: "export-prefix", "yaml-separator",
+	// "non-posix-identifier", "backtick-value", "syntax" for a parse
+	// failure, or "expansion" for a [WithExpand] failure.
+	Rule string
+
+	// Message is a human-readable description.
+	Message string
+
+	// Severity is [SeverityError] for "syntax" and "expansion",
+	// [SeverityWarning] otherwise.
 	Severity Severity
 }
 
 // Lint reports constructs in data that fall outside the portable
-// `.env` subset. The returned slice may contain warnings even when
-// err is non-nil — warnings encountered before a parse failure are
-// preserved.
+// `.env` subset.
 //
-// Warnings ([SeverityWarning] entries) come from a fast surface scan, not
-// from the real parser, so on malformed input they can be approximate or
-// diverge from what [Parse] reports; the returned error is authoritative for
-// "does this parse". When parsing fails, the failure is reported both as a
-// [SeverityError] entry (carrying the failure [Position]) and as the returned
-// error.
+// Warnings ([SeverityWarning] entries) come from the parser's entries,
+// one set per assignment at the assignment's start, so text inside a
+// quoted value is never mistaken for a key. When parsing fails, the
+// warnings cover the entries before the failure, and the failure is
+// reported both as a [SeverityError] entry and as the returned error.
 func Lint(data []byte, opts ...ParseOption) ([]LintIssue, error) {
 	o := defaultParseOptions()
 	for _, opt := range opts {
@@ -65,15 +72,28 @@ func Lint(data []byte, opts ...ParseOption) ([]LintIssue, error) {
 		})
 	}
 
-	// Walk the source for non-portable constructs first so that a
-	// later parse failure doesn't suppress already-detected warnings.
-	scanForLintWarnings(data, o, collect)
+	entries, err := scanEntries(data, o)
+	for _, e := range entries {
+		lintEntry(e, collect)
+	}
+	if err == nil && o.expand {
+		f := &File{entries: entries}
+		err = f.expandAll(o)
+	}
 
-	if _, err := parse(data, o); err != nil {
+	if err != nil {
 		var pe *ParseError
-		if asParseError(err, &pe) {
+		var ee *ExpansionError
+		switch {
+		case errors.As(err, &pe):
 			collect("syntax", pe.Message, pe.Pos, SeverityError)
-		} else {
+		case errors.As(err, &ee):
+			msg := ee.Reason
+			if ee.Variable != "" {
+				msg = fmt.Sprintf("%q: %s", ee.Variable, ee.Reason)
+			}
+			collect("expansion", msg, ee.Pos, SeverityError)
+		default:
 			collect("syntax", err.Error(), Position{}, SeverityError)
 		}
 		return issues, err
@@ -81,78 +101,31 @@ func Lint(data []byte, opts ...ParseOption) ([]LintIssue, error) {
 	return issues, nil
 }
 
-func asParseError(err error, dst **ParseError) bool {
-	return errors.As(err, dst)
-}
-
-func scanForLintWarnings(src []byte, opts parseOptions, collect func(rule, msg string, pos Position, sev Severity)) {
-	src = stripUTF8BOM(src)
-	line := 1
-	i := 0
-	for i < len(src) {
-		lineStart := i
-		for i < len(src) && src[i] != '\n' && src[i] != '\r' {
-			i++
-		}
-		raw := string(src[lineStart:i])
-		if i < len(src) {
-			if src[i] == '\r' {
-				i++
-				if i < len(src) && src[i] == '\n' {
-					i++
-				}
-			} else {
-				i++
-			}
-		}
-		lintLine(raw, line, opts, collect)
-		line++
-	}
-}
-
-// lintLine inspects one physical line. Continuation lines of multi-
-// line double-quoted values produce noisy warnings; that's acceptable
-// since multi-line values aren't in the portable subset either.
-func lintLine(raw string, lineNo int, opts parseOptions, collect func(rule, msg string, pos Position, sev Severity)) {
-	trimmed := strings.TrimLeft(raw, " \t")
-	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+// lintEntry reports the non-portable constructs of one assignment.
+func lintEntry(e Entry, collect func(rule, msg string, pos Position, sev Severity)) {
+	if e.Kind != EntryAssignment {
 		return
 	}
-	pos := Position{File: opts.filePath, Line: lineNo, Column: 1}
-
-	if strings.HasPrefix(trimmed, "export ") {
+	if e.exported {
 		collect("export-prefix", "`export ` prefix is not portable to motdotla/dotenv",
-			pos, SeverityWarning)
-		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "export "))
+			e.Pos, SeverityWarning)
 	}
-
-	eqIdx := strings.IndexByte(trimmed, '=')
-	colonIdx := strings.IndexByte(trimmed, ':')
-	if colonIdx >= 0 && (eqIdx < 0 || colonIdx < eqIdx) {
+	if e.sep == ':' {
 		collect("yaml-separator",
 			"`KEY: VALUE` form is not portable; use `KEY=VALUE`",
-			pos, SeverityWarning)
+			e.Pos, SeverityWarning)
 	}
-
-	keyEnd := eqIdx
-	if colonIdx >= 0 && (keyEnd < 0 || colonIdx < keyEnd) {
-		keyEnd = colonIdx
-	}
-	if keyEnd > 0 {
-		key := strings.TrimRight(trimmed[:keyEnd], " \t")
-		for _, r := range key {
-			if r == '-' || r == '.' {
-				collect("non-posix-identifier",
-					"identifier \""+key+"\" contains non-POSIX character",
-					pos, SeverityWarning)
-				break
-			}
+	for i := range len(e.Key) {
+		if !isIdentifierByte(e.Key[i], false) {
+			collect("non-posix-identifier",
+				"identifier \""+e.Key+"\" contains non-POSIX character",
+				e.Pos, SeverityWarning)
+			break
 		}
 	}
-
-	if strings.Contains(trimmed, "`") {
+	if e.quote == '`' {
 		collect("backtick-value",
 			"backtick-quoted value is not portable; use double quotes",
-			pos, SeverityWarning)
+			e.Pos, SeverityWarning)
 	}
 }

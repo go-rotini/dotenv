@@ -538,13 +538,88 @@ func TestScanner_KeyOnlyNoSepEOF(t *testing.T) {
 }
 
 func TestScanner_HasExportPrefix_EdgeCases(t *testing.T) {
-	if hasExportPrefix([]byte("export ")) {
-		t.Error("'export ' alone (no following ident) should not match")
+	for in, want := range map[string]bool{
+		"export ":     false, // no following identifier
+		"export X":    true,
+		"export\tX":   true,
+		"export   X":  true,
+		"exportX":     false, // a key named exportX
+		"export =1":   false, // a key named export
+		"exp":         false,
+		"export \x80": false, // non-ASCII start needs relaxed names
+	} {
+		if got := hasExportPrefix([]byte(in), false); got != want {
+			t.Errorf("hasExportPrefix(%q) = %v, want %v", in, got, want)
+		}
 	}
-	if !hasExportPrefix([]byte("export X")) {
-		t.Error("'export X' should match")
+	if !hasExportPrefix([]byte("export \x80"), true) {
+		t.Error("relaxed names: non-ASCII identifier start should match")
 	}
-	if hasExportPrefix([]byte("exp")) {
-		t.Error("short prefix should not match")
+}
+
+func TestScanner_ExportVariants(t *testing.T) {
+	for _, src := range []string{"export\tA=1\n", "export  A=1\n", "export \t A=1\n"} {
+		f, err := Parse([]byte(src))
+		if err != nil {
+			t.Errorf("Parse(%q) = %v", src, err)
+			continue
+		}
+		if v, _ := f.Get("A"); v != "1" {
+			t.Errorf("Parse(%q): A = %q", src, v)
+		}
+	}
+	_, err := Parse([]byte("A=1\nexport A\n"))
+	if !errors.Is(err, ErrParse) || !strings.Contains(err.Error(), "`export A` without an assignment") {
+		t.Errorf("bare export: %v", err)
+	}
+}
+
+func TestScanner_NULAfterBackslashInDoubleQuotes(t *testing.T) {
+	f, err := Parse([]byte("A=\"x\\\x00y\"\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if v, _ := f.Get("A"); v != "x\\\x00y" {
+		t.Errorf("A = %q", v)
+	}
+	if _, err := Parse([]byte(`A="x\`)); err == nil || !strings.Contains(err.Error(), "unterminated escape") {
+		t.Errorf("backslash at EOF: %v", err)
+	}
+}
+
+func TestScanner_MaxLineLengthExcludesLineEnding(t *testing.T) {
+	for _, src := range []string{"K=abc", "K=abc\n", "K=abc\r\n", "K=abc\r", "# 123\n"} {
+		if _, err := Parse([]byte(src), WithMaxLineLength(5)); err != nil {
+			t.Errorf("Parse(%q) with limit 5 = %v, want nil", src, err)
+		}
+	}
+	if _, err := Parse([]byte("K=abcd\n"), WithMaxLineLength(5)); !errors.Is(err, ErrLineTooLong) {
+		t.Errorf("6-byte entry with limit 5 = %v, want ErrLineTooLong", err)
+	}
+	// A multi-line quoted value counts its inner line endings, not the last.
+	if _, err := Parse([]byte("K='a\nb'\n"), WithMaxLineLength(7)); err != nil {
+		t.Errorf("7-byte multi-line entry with limit 7 = %v, want nil", err)
+	}
+}
+
+func TestScanner_QuotedLineBreaksReadAsLF(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"double CRLF", "A=\"l1\r\nl2\"\r\n", "l1\nl2"},
+		{"double bare CR", "A=\"l1\rl2\"\r", "l1\nl2"},
+		{"single CRLF", "A='l1\r\nl2'\r\n", "l1\nl2"},
+		{"single bare CR", "A='l1\rl2'", "l1\nl2"},
+		{"escaped CR kept", "A=\"l1\\r\\nl2\"", "l1\r\nl2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _ := mustParse(t, tc.src).Get("A")
+			if got != tc.want {
+				t.Errorf("A = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	f := mustParse(t, "A=`l1\r\nl2`", WithBackticks())
+	if got, _ := f.Get("A"); got != "l1\nl2" {
+		t.Errorf("backtick A = %q, want %q", got, "l1\nl2")
 	}
 }

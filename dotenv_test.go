@@ -2,6 +2,7 @@ package dotenv
 
 import (
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -193,3 +194,98 @@ func TestNewReaderSource_ReadError(t *testing.T) {
 // the file" coverage lives in github.com/go-rotini/env (and the higher-level
 // rotini CLI package), which can import this package; dotenv intentionally
 // does not depend on env.
+
+// countingReader yields an endless stream of "A=1\n" and counts bytes read.
+type countingReader struct{ n int64 }
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = "A=1\n"[(r.n+int64(i))%4]
+	}
+	r.n += int64(len(p))
+	return len(p), nil
+}
+
+func TestNewReaderSource_ReadsOnlyUpToLimit(t *testing.T) {
+	r := &countingReader{}
+	_, err := NewReaderSource(r, WithMaxFileSize(1024))
+	if !errors.Is(err, ErrFileTooLarge) || !errors.Is(err, ErrParse) {
+		t.Fatalf("err = %v, want ErrFileTooLarge", err)
+	}
+	if r.n > 64*1024 {
+		t.Errorf("read %d bytes for a 1024-byte limit", r.n)
+	}
+}
+
+func TestLoad_RegularFileOverLimitNotRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "big.env")
+	if err := os.WriteFile(path, []byte(strings.Repeat("A=1\n", 100)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path, WithMaxFileSize(10))
+	if !errors.Is(err, ErrFileTooLarge) {
+		t.Fatalf("err = %v, want ErrFileTooLarge", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("error lacks the path: %v", err)
+	}
+	if _, err := Load(path, WithMaxFileSize(400)); err != nil {
+		t.Errorf("at the limit: %v", err)
+	}
+}
+
+func TestLimitErrorsCarryPosition(t *testing.T) {
+	_, err := Load(writeTemp(t, "A=1\nB=0123456789\n"), WithMaxLineLength(5))
+	pe, ok := errors.AsType[*ParseError](err)
+	if !ok || !errors.Is(err, ErrLineTooLong) {
+		t.Fatalf("err = %v, want *ParseError wrapping ErrLineTooLong", err)
+	}
+	if pe.Pos.Line != 2 || pe.Pos.Column != 1 || pe.Pos.File == "" {
+		t.Errorf("Pos = %+v, want file, line 2, column 1", pe.Pos)
+	}
+	if strings.Count(err.Error(), "dotenv:") != 1 {
+		t.Errorf("message = %q", err.Error())
+	}
+}
+
+func writeTemp(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestMaxInt64FileSizeIsUnlimited(t *testing.T) {
+	src, err := NewReaderSource(strings.NewReader("A=1\n"), WithMaxFileSize(math.MaxInt64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := src.Lookup("A"); !ok || v != "1" {
+		t.Errorf("reader: A = %q, %v", v, ok)
+	}
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte("A=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(path, WithMaxFileSize(math.MaxInt64))
+	if err != nil || m["A"] != "1" {
+		t.Errorf("Load = %v, %v", m, err)
+	}
+}
+
+func TestLoadReadErrorPrefixedOnce(t *testing.T) {
+	dir := t.TempDir()
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("want an error reading a directory")
+	}
+	if n := strings.Count(err.Error(), "dotenv:"); n != 1 {
+		t.Errorf("err = %q, want one dotenv: prefix", err)
+	}
+	_, err = NewReaderSource(iotest.ErrReader(errors.New("boom")))
+	if err == nil || err.Error() != "dotenv: read: boom" {
+		t.Errorf("reader err = %v", err)
+	}
+}

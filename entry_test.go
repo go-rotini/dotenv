@@ -214,3 +214,11 @@ func TestSource_Keys(t *testing.T) {
 		t.Errorf("nil Source Keys = %v", k)
 	}
 }
+
+func TestFile_EntriesIsACopy(t *testing.T) {
+	f := mustParse(t, "A=1\n")
+	f.Entries()[0].Value = "2"
+	if v, _ := f.Get("A"); v != "1" {
+		t.Errorf("Get = %q after mutating Entries()", v)
+	}
+}

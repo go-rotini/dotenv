@@ -2,6 +2,8 @@ package dotenv_test
 
 import (
 	"bytes"
+	"maps"
+	"strings"
 	"testing"
 
 	"github.com/go-rotini/dotenv"
@@ -88,6 +90,67 @@ func FuzzExpand(f *testing.F) {
 		_, _ = dotenv.Parse(data, dotenv.WithExpand())
 		_, _ = dotenv.Parse(data, dotenv.WithExpand(), dotenv.WithStrictExpansion())
 		_, _ = dotenv.Parse(data, dotenv.WithExpand(), dotenv.WithMaxExpansionDepth(4))
+
+		// Literal text comes from the input, so the expanded values can
+		// exceed the input by at most the substitution budget.
+		const budget = 1 << 12
+		file, err := dotenv.Parse(data, dotenv.WithExpand(), dotenv.WithMaxExpandedSize(budget))
+		if err != nil {
+			return
+		}
+		total := 0
+		for _, e := range file.Entries() {
+			total += len(e.Value)
+		}
+		if total > len(data)+budget {
+			t.Fatalf("expanded to %d bytes from %d input bytes", total, len(data))
+		}
+	})
+}
+
+// FuzzMapRoundTrip checks that a parsed map survives Marshal and a
+// reparse, with expansion off and on (Marshal escapes `$`).
+func FuzzMapRoundTrip(f *testing.F) {
+	for _, s := range []string{"A=1\n", "A='x y'\nB=\"a\\nb\"\n", "a.b-c=1\n", "A=`x`\n", "K: v\n", "A=\"\a$B\"\n"} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		first, err := dotenv.Parse(data, dotenv.WithRelaxedNames(), dotenv.WithBackticks())
+		if err != nil {
+			return
+		}
+		m := first.ToMap()
+		out, err := dotenv.Marshal(m)
+		if err != nil {
+			t.Fatalf("Marshal of parsed map: %v", err)
+		}
+		for _, opts := range [][]dotenv.ParseOption{
+			{dotenv.WithRelaxedNames()},
+			{dotenv.WithRelaxedNames(), dotenv.WithExpand()},
+		} {
+			second, err := dotenv.Parse(out, opts...)
+			if err != nil {
+				t.Fatalf("reparse: %v\n%q", err, out)
+			}
+			if got := second.ToMap(); !maps.Equal(got, m) {
+				t.Fatalf("round trip %q -> %q -> %q", m, out, got)
+			}
+		}
+	})
+}
+
+// FuzzLintAgrees checks that Lint and Parse agree on whether input
+// parses.
+func FuzzLintAgrees(f *testing.F) {
+	for _, s := range scannerSeeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, perr := dotenv.Parse(data)
+		_, lerr := dotenv.Lint(data)
+		if (perr == nil) != (lerr == nil) {
+			t.Fatalf("Parse err %v, Lint err %v", perr, lerr)
+		}
 	})
 }
 
@@ -197,4 +260,45 @@ func equalMaps(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// FuzzEscapedBackslashIsPlain checks that, in a double-quoted value under
+// expansion, `\\` behaves like any plain byte: the value with `\\` reads
+// as the value with `~` in its place, with each `~` turned back into `\`.
+func FuzzEscapedBackslashIsPlain(f *testing.F) {
+	for _, s := range []string{`${A:-C:\Temp\}`, `\${A}`, `${A:-${B:-\}}`, `${A\}`, `${A:+x\}y}`, `${A:?\}`} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		if strings.ContainsAny(s, "~\r") {
+			return
+		}
+		enc := func(bs string) string {
+			var b strings.Builder
+			for i := 0; i < len(s); i++ {
+				switch s[i] {
+				case '\\':
+					b.WriteString(bs)
+				case '"':
+					b.WriteString(`\"`)
+				default:
+					b.WriteByte(s[i])
+				}
+			}
+			return "A=a\nB=\"" + b.String() + "\"\n"
+		}
+		f1, e1 := dotenv.Parse([]byte(enc(`\\`)), dotenv.WithExpand())
+		f2, e2 := dotenv.Parse([]byte(enc(`~`)), dotenv.WithExpand())
+		if (e1 == nil) != (e2 == nil) {
+			t.Fatalf("%q: err %v vs %v", s, e1, e2)
+		}
+		if e1 != nil {
+			return
+		}
+		v1, _ := f1.Get("B")
+		v2, _ := f2.Get("B")
+		if v1 != strings.ReplaceAll(v2, "~", `\`) {
+			t.Fatalf("%q: %q vs %q", s, v1, v2)
+		}
+	})
 }
