@@ -76,9 +76,9 @@ func Lint(data []byte, opts ...ParseOption) ([]LintIssue, error) {
 	for _, e := range entries {
 		lintEntry(e, collect)
 	}
-	if err == nil && o.expand {
+	if err == nil && o.expand != nil {
 		f := &File{entries: entries}
-		err = f.expandAll(o)
+		err = o.expand(f, o)
 	}
 
 	if err != nil {

@@ -11,7 +11,7 @@ package dotenv
 type ParseOption func(*parseOptions)
 
 type parseOptions struct {
-	expand            bool
+	expand            func(*File, parseOptions) error // (*File).expandAll, set by WithExpand and WithExpandFromOSEnv, so a parse without them doesn't link expansion
 	strictExpansion   bool
 	maxExpansionDepth int
 	expansionParent   VarLookup
@@ -54,7 +54,7 @@ func defaultParseOptions() parseOptions {
 // referenced. Lookups walk the file's already-parsed entries first, then
 // any parent set via [WithExpansionParent].
 func WithExpand() ParseOption {
-	return func(o *parseOptions) { o.expand = true }
+	return func(o *parseOptions) { o.expand = (*File).expandAll }
 }
 
 // WithStrictExpansion makes a reference to an unset variable raise an
@@ -102,7 +102,7 @@ func WithExpansionParent(parent VarLookup) ParseOption {
 // file's own entries take precedence over the environment.
 func WithExpandFromOSEnv() ParseOption {
 	return func(o *parseOptions) {
-		o.expand = true
+		o.expand = (*File).expandAll
 		o.expansionParent = osEnvLookup{}
 	}
 }

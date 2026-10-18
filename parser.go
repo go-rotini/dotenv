@@ -6,8 +6,8 @@ func parse(src []byte, opts parseOptions) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if opts.expand {
-		if err := f.expandAll(opts); err != nil {
+	if opts.expand != nil {
+		if err := opts.expand(f, opts); err != nil {
 			return nil, err
 		}
 	}
