@@ -358,7 +358,7 @@ func (s *scanner) scanDoubleQuoted() (value string, literal []int, err error) {
 				buf.WriteByte('"')
 				s.advance(2)
 			case '\\', '$':
-				if s.opts.expand {
+				if s.opts.expand != nil {
 					literal = append(literal, buf.Len())
 				}
 				buf.WriteByte(next)
